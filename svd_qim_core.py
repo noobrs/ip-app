@@ -536,6 +536,75 @@ def extract_bits_y_multilevel_svd_qim(
     return out_bits
 
 # ===============================
+# Batch wrappers (Y-channel lists)
+# ===============================
+def embed_bits_y_multilevel_svd_qim_batch(
+    y_lumas: list,
+    bits: list,
+    secret_key: int,
+    quant_step: float,
+    svd_index: int = 0,
+    svd_patch=((2, 6), (2, 6)),
+    wavelet='haar',
+    dwt_levels: int = 2,
+    tiles=(2, 2),
+    repeat: int = 0,
+    include_LL: bool = False,
+    include_D: bool = False
+):
+    """Return list of Y_wm arrays, one per input Y."""
+    out = []
+    for y in y_lumas:
+        y_wm = embed_bits_y_multilevel_svd_qim(
+            y_luma=y,
+            bits=bits,
+            secret_key=secret_key,
+            quant_step=quant_step,
+            svd_index=svd_index,
+            svd_patch=svd_patch,
+            wavelet=wavelet,
+            dwt_levels=dwt_levels,
+            tiles=tiles,
+            repeat=repeat,
+            include_LL=include_LL,
+            include_D=include_D,
+        )
+        out.append(y_wm)
+    return out
+
+def extract_bits_y_multilevel_svd_qim_batch(
+    y_lumas: list,
+    n_bits: int,
+    secret_key: int,
+    quant_step: float,
+    svd_index: int = 0,
+    svd_patch=((2, 6), (2, 6)),
+    wavelet='haar',
+    dwt_levels: int = 2,
+    tiles=(2, 2),
+    include_LL: bool = False,
+    include_D: bool = False
+):
+    """Return list[ list[int] ] of extracted bits (one per Y)."""
+    out_bits = []
+    for y in y_lumas:
+        bits = extract_bits_y_multilevel_svd_qim(
+            y_luma=y,
+            n_bits=n_bits,
+            secret_key=secret_key,
+            quant_step=quant_step,
+            svd_index=svd_index,
+            svd_patch=svd_patch,
+            wavelet=wavelet,
+            dwt_levels=dwt_levels,
+            tiles=tiles,
+            include_LL=include_LL,
+            include_D=include_D,
+        )
+        out_bits.append(bits)
+    return out_bits
+
+# ===============================
 # Attack helpers (for testing)
 # ===============================
 

@@ -11,7 +11,8 @@ import graphviz
 from svd_qim_core import (
     psnr, bit_error_rate,
     embed_bits_y_multilevel_svd_qim, extract_bits_y_multilevel_svd_qim,
-    bands_all_levels,  # for capacity calc
+    embed_bits_y_multilevel_svd_qim_batch, extract_bits_y_multilevel_svd_qim_batch,  # <-- NEW
+    bands_all_levels,
 )
 from svd_qim_core import dwt2 as core_dwt2  # to match your wavelet settings
 from svd_qim_core import compute_tile_slices  # same tiling logic as core
@@ -184,19 +185,31 @@ if "ref_wm_bits" not in st.session_state:
 # ==========================================================
 with tabs[0]:
     st.header("Embed")
-    host_file = st.file_uploader("Host image (RGB). If none, a demo gradient will be used.", type=["png","jpg","jpeg","webp"], key="host_upl")
-    wm_file   = st.file_uploader("Watermark image (will be binarized to fixed 32×32)", type=["png","jpg","jpeg","webp"], key="wm_upl")
+    host_files = st.file_uploader(
+        "Host image(s) (RGB). If none, a demo gradient will be used.",
+        type=["png","jpg","jpeg","webp"],
+        key="host_upl",
+        accept_multiple_files=True
+    )
+    wm_file   = st.file_uploader(
+        "Watermark image (will be binarized to fixed 32×32)",
+        type=["png","jpg","jpeg","webp"],
+        key="wm_upl"
+    )
 
-    # Load host
-    if host_file:
-        host_pil = Image.open(host_file).convert("RGB")
+    # Prepare list of host PILs
+    host_pils = []
+    host_names = []
+    if host_files:
+        for f in host_files:
+            host_pils.append(Image.open(f).convert("RGB"))
+            host_names.append(getattr(f, "name", "host.png"))
     else:
-        host_pil = default_host()
-        st.info("No host uploaded — using a colorful synthetic image.")
+        host_pils = [default_host()]
+        host_names = ["demo.png"]
+        st.info("No host uploaded — using a colorful synthetic image (1 item).")
 
-    H, W = host_pil.size[1], host_pil.size[0]
-
-    # Show recommended minimum size (for current params)
+    # Recommended minimum size (shown once; capacity per file is shown during loop)
     n_bits = WATERMARK_N * WATERMARK_N
     recN, capN = recommend_min_square_size(
         n_bits=n_bits,
@@ -206,32 +219,24 @@ with tabs[0]:
         include_LL=bool(include_LL),
         include_D=bool(include_D),
     )
-    current_capacity = total_capacity_for_shape(
-        H, W, wavelet, int(dwt_levels), (int(tiles_r), int(tiles_c)), bool(include_LL), bool(include_D)
-    )
-    st.markdown(
-        f"**Recommended minimum host size (square)** for these settings: **{recN}×{recN}** "
-        f"(capacity≈{capN} blocks for {n_bits} bits).  \n"
-        f"Your image: **{W}×{H}**, capacity≈**{current_capacity}** blocks."
-    )
-    if current_capacity < n_bits:
-        st.warning("Capacity is lower than 32×32=1024 bits in at least one tile/band; "
-                   "embedding will still run but repetition/coverage per bit may be uneven. "
-                   "Use a larger image or more tiles/bands/levels.")
+    st.markdown(f"**Recommended minimum host size (square)** for these settings: **{recN}×{recN}** "
+                f"(capacity≈{capN} blocks for {n_bits} bits).")
 
-    # Prepare watermark bits
+    # Watermark bits (required)
     if wm_file:
         wm_pil = Image.open(wm_file)
         wm_bin = make_binary_watermark_from_pil(wm_pil, size=WATERMARK_N)
+        wm_bits = wm_bin.reshape(-1).tolist()
     else:
-        st.info("Please upload a watermark image (any size); it will be binarized to 32×32.")
         wm_bin = None
+        wm_bits = None
+        st.info("Please upload a watermark image (any size); it will be binarized to 32×32.")
 
-    # Show inputs
+    # Preview first host + watermark
     col_in1, col_in2 = st.columns(2)
     with col_in1:
-        st.markdown("**Host**")
-        st.image(host_pil, use_column_width=True)
+        st.markdown("**Sample Host (first)**")
+        st.image(host_pils[0], use_column_width=True)
     with col_in2:
         st.markdown("**Watermark (fixed 32×32, binary preview)**")
         if wm_bin is not None:
@@ -239,14 +244,19 @@ with tabs[0]:
         else:
             st.write("—")
 
-    if st.button("🔧 Embed Watermark"):
-        if wm_bin is None:
+    if st.button("🔧 Embed Watermark (Batch)"):
+        if wm_bits is None:
             st.warning("Upload a watermark first.")
         else:
-            wm_bits = wm_bin.reshape(-1).tolist()
-            y_host, cb_host, cr_host = rgb_to_ycbcr_arrays(host_pil)
-            y_wm = embed_bits_y_multilevel_svd_qim(
-                y_luma=y_host,
+            # Convert all hosts to YCbCr arrays
+            y_list, cb_list, cr_list = [], [], []
+            for hp in host_pils:
+                y, cb, cr = rgb_to_ycbcr_arrays(hp)
+                y_list.append(y); cb_list.append(cb); cr_list.append(cr)
+
+            # Batch-embed on Y
+            y_wm_list = embed_bits_y_multilevel_svd_qim_batch(
+                y_lumas=y_list,
                 bits=wm_bits,
                 secret_key=int(secret_key),
                 quant_step=float(quant_step),
@@ -259,28 +269,38 @@ with tabs[0]:
                 include_LL=bool(include_LL),
                 include_D=bool(include_D),
             )
-            wm_rgb_pil = ycbcr_arrays_to_rgb(y_wm, cb_host, cr_host)
-            wm_rgb = pil_to_np_rgb(wm_rgb_pil)
-            host_rgb = pil_to_np_rgb(host_pil)
 
-            st.session_state["watermarked_rgb"] = wm_rgb
-            st.session_state["last_wm_bits"] = wm_bits  # store what we actually embedded
+            # Recombine and display per-file results
+            st.session_state["last_wm_bits"] = wm_bits
+            st.session_state["watermarked_rgb"] = None  # will set for the last item (keeps Attack tab behavior)
 
-            # Show side-by-side
-            col_a, col_b = st.columns(2, gap="large")
-            with col_a:
-                st.markdown("**Original**")
-                st.image(host_pil, use_column_width=True)
-            with col_b:
-                st.markdown("**Watermarked**")
-                st.image(wm_rgb_pil, use_column_width=True)
+            for idx, (hp, y_wm, cb, cr, name) in enumerate(zip(host_pils, y_wm_list, cb_list, cr_list, host_names), start=1):
+                wm_rgb_pil = ycbcr_arrays_to_rgb(y_wm, cb, cr)
+                wm_rgb = pil_to_np_rgb(wm_rgb_pil)
+                host_rgb = pil_to_np_rgb(hp)
 
-            # PSNR below
-            psnr_val = psnr(host_rgb, wm_rgb)
-            st.metric("PSNR (Original vs Watermarked)", f"{psnr_val:.2f} dB")
+                # Save last item for Attack tab
+                st.session_state["watermarked_rgb"] = wm_rgb
 
-            # Download
-            np_image_download_button(wm_rgb_pil, "⬇️ Download watermarked", "watermarked.png")
+                # Capacity for this file
+                H, W = hp.size[1], hp.size[0]
+                file_capacity = total_capacity_for_shape(
+                    H, W, wavelet, int(dwt_levels), (int(tiles_r), int(tiles_c)), bool(include_LL), bool(include_D)
+                )
+
+                st.markdown(f"### Result #{idx}: `{name}`  ·  Image size: **{W}×{H}**  ·  Capacity≈**{file_capacity}** blocks")
+                col_a, col_b = st.columns(2, gap="large")
+                with col_a:
+                    st.markdown("**Original**")
+                    st.image(hp, use_column_width=True)
+                with col_b:
+                    st.markdown("**Watermarked**")
+                    st.image(wm_rgb_pil, use_column_width=True)
+
+                psnr_val = psnr(host_rgb, wm_rgb)
+                st.metric("PSNR (Original vs Watermarked)", f"{psnr_val:.2f} dB")
+                np_image_download_button(wm_rgb_pil, f"⬇️ Download `{name}` (watermarked)", f"{name.rsplit('.',1)[0]}_watermarked.png")
+                st.markdown("---")
 
 # ==========================================================
 # TAB 2: EXTRACT
@@ -290,17 +310,42 @@ with tabs[1]:
     st.caption("Upload only the watermarked image for extraction. "
                "Upload the original watermark (32×32) if you want BER.")
 
-    attacked_file = st.file_uploader("Watermarked image to extract from", type=["png","jpg","jpeg","webp"], key="attacked_upl")
-    ori_wm_file   = st.file_uploader("Original watermark image (for BER, optional)", type=["png","jpg","jpeg","webp"], key="oriwm_upl")
+    attacked_files = st.file_uploader(
+        "Watermarked image(s) to extract from",
+        type=["png","jpg","jpeg","webp"],
+        key="attacked_upl",
+        accept_multiple_files=True
+    )
+    ori_wm_file   = st.file_uploader(
+        "Original watermark image (for BER, optional; will be binarized to 32×32)",
+        type=["png","jpg","jpeg","webp"],
+        key="oriwm_upl"
+    )
 
-    if st.button("🔎 Extract Watermark"):
-        if attacked_file is None:
-            st.warning("Please upload a watermarked image.")
+    if st.button("🔎 Extract Watermark(s)"):
+        if not attacked_files:
+            st.warning("Please upload at least one watermarked image.")
         else:
-            src_pil = Image.open(attacked_file).convert("RGB")
-            y_src, _, _ = rgb_to_ycbcr_arrays(src_pil)
-            bits_out = extract_bits_y_multilevel_svd_qim(
-                y_luma=y_src,
+            # Reference watermark bits (optional)
+            ref_bits = None
+            if ori_wm_file:
+                ori_wm_pil = Image.open(ori_wm_file)
+                ori_wm_bin = make_binary_watermark_from_pil(ori_wm_pil, size=WATERMARK_N)
+                ref_bits = ori_wm_bin.reshape(-1).tolist()
+                st.session_state["ref_wm_bits"] = ref_bits
+
+            # Build lists of Y from all attacked files
+            atk_pils, atk_names, y_list = [], [], []
+            for f in attacked_files:
+                pil_img = Image.open(f).convert("RGB")
+                atk_pils.append(pil_img)
+                atk_names.append(getattr(f, "name", "watermarked.png"))
+                y, _, _ = rgb_to_ycbcr_arrays(pil_img)
+                y_list.append(y)
+
+            # Batch extract bits
+            bits_list = extract_bits_y_multilevel_svd_qim_batch(
+                y_lumas=y_list,
                 n_bits=WATERMARK_N * WATERMARK_N,
                 secret_key=int(secret_key),
                 quant_step=float(quant_step),
@@ -312,21 +357,27 @@ with tabs[1]:
                 include_LL=bool(include_LL),
                 include_D=bool(include_D),
             )
-            wm_rec = np.array(bits_out, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
-            st.markdown("**Extracted watermark**")
-            st.image((wm_rec * 255).astype(np.uint8), clamp=True, width=256)
 
-            # If original watermark is provided, compute BER
-            if ori_wm_file:
-                ori_wm_pil = Image.open(ori_wm_file)
-                ori_wm_bin = make_binary_watermark_from_pil(ori_wm_pil, size=WATERMARK_N)
-                ref_bits = ori_wm_bin.reshape(-1).tolist()
-                st.session_state["ref_wm_bits"] = ref_bits
-                ber_val, stats = bit_error_rate(ref_bits, bits_out, return_counts=True)
-                st.metric("BER", f"{ber_val:.4f}")
-                st.write(f"Accuracy: **{stats['accuracy']:.4f}**  |  Errors: **{stats['errors']}/{stats['total']}**")
-            else:
-                st.info("Upload the original 32×32 watermark image above to compute BER.")
+            # Show per-file results
+            for idx, (name, bits_out) in enumerate(zip(atk_names, bits_list), start=1):
+                wm_rec = np.array(bits_out, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
+                st.markdown(f"### Extracted #{idx}: `{name}`")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**Source image**")
+                    st.image(atk_pils[idx-1], use_column_width=True)
+                with col2:
+                    st.markdown("**Recovered 32×32 watermark**")
+                    st.image((wm_rec * 255).astype(np.uint8), clamp=True, width=256)
+
+                if ref_bits is not None:
+                    ber_val, stats = bit_error_rate(ref_bits, bits_out, return_counts=True)
+                    st.metric("BER", f"{ber_val:.4f}")
+                    st.write(f"Accuracy: **{stats['accuracy']:.4f}**  |  Errors: **{stats['errors']}/{stats['total']}**")
+                else:
+                    st.info("Upload the original 32×32 watermark image above to compute BER.")
+                st.markdown("---")
+
 
 # ==========================================================
 # TAB 3: ATTACK
