@@ -4,3 +4,4 @@ Pillow
 opencv-python-headless
 PyWavelets
 scipy
+graphviz

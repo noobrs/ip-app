@@ -5,6 +5,7 @@ import streamlit as st
 from PIL import Image
 import cv2
 import pywt
+import graphviz
 
 # ---- bring in your core functions (unchanged) ----
 from svd_qim_core import (
@@ -168,7 +169,7 @@ with st.sidebar:
     r0 = st.slider("Patch row start", 0, 7, 2); r1 = st.slider("Patch row end (exclusive)", r0+1, 8, 6)
     c0 = st.slider("Patch col start", 0, 7, 2); c1 = st.slider("Patch col end (exclusive)", c0+1, 8, 6)
 
-tabs = st.tabs(["Embed", "Extract", "Attack"])
+tabs = st.tabs(["Embed", "Extract", "Attack", "Flow"])
 
 # Keep session state
 if "watermarked_rgb" not in st.session_state:
@@ -320,6 +321,7 @@ with tabs[1]:
                 ori_wm_pil = Image.open(ori_wm_file)
                 ori_wm_bin = make_binary_watermark_from_pil(ori_wm_pil, size=WATERMARK_N)
                 ref_bits = ori_wm_bin.reshape(-1).tolist()
+                st.session_state["ref_wm_bits"] = ref_bits
                 ber_val, stats = bit_error_rate(ref_bits, bits_out, return_counts=True)
                 st.metric("BER", f"{ber_val:.4f}")
                 st.write(f"Accuracy: **{stats['accuracy']:.4f}**  |  Errors: **{stats['errors']}/{stats['total']}**")
@@ -428,3 +430,110 @@ with tabs[2]:
                         st.metric("BER (Cutouts vs last embedded)", f"{ber_val:.4f}")
                     else:
                         st.info("To show BER here, run Extract with an original watermark first.")
+
+# ==========================================================
+# TAB 4: FLOW (visual explanation)
+# ==========================================================
+with tabs[3]:
+    st.header("How it Works: Embed & Extract")
+
+    colL, colR = st.columns(2)
+
+    # -------- Embed pipeline diagram --------
+    with colL:
+        st.subheader("Embed pipeline")
+        dot_embed = graphviz.Digraph("embed", format="svg")
+        dot_embed.attr(rankdir="LR", fontsize="10", labelloc="t")
+
+        dot_embed.node("rgb_in", "Host RGB")
+        dot_embed.node("ycbcr", "Convert to YCbCr\n(embed in Y only)")
+        dot_embed.node("dwt", "Multi-level DWT\n(H,V,(D) bands)")
+        dot_embed.node("tiling", "Tile each band\n(e.g., 2×2)")
+        dot_embed.node("dct", "8×8 block DCT\n(JPEG-like)")
+        dot_embed.node("patch", "Mid-band patch\n(rows r0:r1, cols c0:c1)")
+        dot_embed.node("svd", "SVD: U·diag(σ)·Vᵀ")
+        dot_embed.node("qim", "QIM on σₖ\n(step=Δ, bit∈{0,1})")
+        dot_embed.node("idct", "IDCT per 8×8")
+        dot_embed.node("idwt", "Inverse DWT")
+        dot_embed.node("merge", "Merge Y with Cb/Cr")
+        dot_embed.node("rgb_out", "Watermarked RGB")
+
+        # Secret key branch
+        dot_embed.node("key", "Secret key", shape="note")
+        dot_embed.node("rand", "Randomized block assignment\n(seed = key ⊕ tile ⊕ band ⊕ level)")
+        dot_embed.edge("key", "rand", style="dashed")
+        dot_embed.edge("rand", "dct", style="dashed", label="select block order")
+
+        # Main flow
+        dot_embed.edge("rgb_in", "ycbcr")
+        dot_embed.edge("ycbcr", "dwt")
+        dot_embed.edge("dwt", "tiling")
+        dot_embed.edge("tiling", "dct")
+        dot_embed.edge("dct", "patch")
+        dot_embed.edge("patch", "svd")
+        dot_embed.edge("svd", "qim")
+        dot_embed.edge("qim", "idct")
+        dot_embed.edge("idct", "idwt")
+        dot_embed.edge("idwt", "merge")
+        dot_embed.edge("merge", "rgb_out")
+
+        st.graphviz_chart(dot_embed, use_container_width=True)
+
+        st.caption(
+            "We convert RGB→YCbCr and embed only in Y (luma) for perceptual robustness. "
+            "For each DWT band/tile, we DCT 8×8 blocks, take a **mid-band patch**, compute SVD, and quantize **one σₖ** via **QIM**. "
+            "A secret-key seeds randomized block assignment and repetition. Finally we IDCT, IDWT, and recombine Y with original Cb/Cr."
+        )
+
+    # -------- Extract pipeline diagram --------
+    with colR:
+        st.subheader("Extract pipeline")
+        dot_ext = graphviz.Digraph("extract", format="svg")
+        dot_ext.attr(rankdir="LR", fontsize="10", labelloc="t")
+
+        dot_ext.node("rgb_in2", "Input RGB\n(watermarked/attacked)")
+        dot_ext.node("ycbcr2", "Convert to YCbCr\n(use Y)")
+        dot_ext.node("dwt2", "Multi-level DWT\n(same params)")
+        dot_ext.node("tiling2", "Same tiles")
+        dot_ext.node("dct2", "8×8 block DCT")
+        dot_ext.node("patch2", "Mid-band patch")
+        dot_ext.node("svd2", "SVD → σₖ")
+        dot_ext.node("llr", "QIM log-likelihood\nscore per block")
+        dot_ext.node("vote", "Soft voting across\nrepetitions/bands/tiles")
+        dot_ext.node("thresh", "Threshold ≥0 → bit=1\n<0 → bit=0")
+        dot_ext.node("reshape", "Reshape bits to 32×32\nwatermark")
+
+        # Secret key branch (same selection)
+        dot_ext.node("key2", "Secret key", shape="note")
+        dot_ext.node("rand2", "Reproduce block order")
+        dot_ext.edge("key2", "rand2", style="dashed")
+        dot_ext.edge("rand2", "dct2", style="dashed")
+
+        # Main flow
+        dot_ext.edge("rgb_in2", "ycbcr2")
+        dot_ext.edge("ycbcr2", "dwt2")
+        dot_ext.edge("dwt2", "tiling2")
+        dot_ext.edge("tiling2", "dct2")
+        dot_ext.edge("dct2", "patch2")
+        dot_ext.edge("patch2", "svd2")
+        dot_ext.edge("svd2", "llr")
+        dot_ext.edge("llr", "vote")
+        dot_ext.edge("vote", "thresh")
+        dot_ext.edge("thresh", "reshape")
+
+        st.graphviz_chart(dot_ext, use_container_width=True)
+
+        st.caption(
+            "Extraction mirrors embedding: we recompute σₖ and convert to a **soft score** (LLR) per block, "
+            "then **sum** across repetitions/tiles/bands (soft voting). The sign of the total gives the bit, "
+            "and we reshape to 32×32. If you upload the original watermark, the app reports **BER**."
+        )
+
+    st.markdown("---")
+    st.subheader("Why this design resists JPEG and small cutouts")
+    st.markdown(
+        "- **Mid-band DCT**: avoids DC/very-low frequencies (visible distortion) and very-high frequencies (aggressively quantized by JPEG).\n"
+        "- **Σ-only QIM**: singular values are stable summaries of patch energy → robust to mild filtering and quantization.\n"
+        "- **Tiling + randomized repetition**: spatial spread means small local erasures (stickers/dust) only remove a few votes.\n"
+        "- **Soft voting**: uses log-likelihood rather than hard 0/1, improving accuracy under moderate distortions."
+    )
