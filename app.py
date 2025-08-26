@@ -115,6 +115,38 @@ def small_random_cutout_mem(
             raise ValueError("fill must be one of {'noise','black','avg','blur'}")
     return arr
 
+# --- JPEG 2000 (JP2) attack in memory ---
+def jpeg2000_attack_mem(in_rgb: np.ndarray, compression_x1000: int = 2000):
+    """
+    Encode -> decode as JPEG 2000 in memory.
+    compression_x1000 ≈ compression ratio × 1000 (OpenCV flag).
+    - 1000 ~ lossless-ish / low compression
+    - larger values ~ stronger compression
+    """
+    bgr = cv2.cvtColor(in_rgb, cv2.COLOR_RGB2BGR)
+    buf = None
+    try:
+        # Try explicit compression setting (if flag is present in this OpenCV build)
+        buf_ok, buf = cv2.imencode(
+            ".jp2", bgr,
+            [cv2.IMWRITE_JPEG2000_COMPRESSION_X1000, int(compression_x1000)]
+        )
+        if not buf_ok:
+            raise RuntimeError("OpenCV JP2 encode failed with COMPRESSION_X1000")
+    except Exception:
+        # Fallback: default JP2 encode (builds without the flag)
+        buf_ok, buf = cv2.imencode(".jp2", bgr)
+        if not buf_ok:
+            raise RuntimeError("This OpenCV build lacks JPEG 2000 (.jp2) support.")
+
+    # Decode back to RGB for downstream extraction
+    arr = np.frombuffer(buf.tobytes(), dtype=np.uint8)
+    bgr2 = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if bgr2 is None:
+        raise RuntimeError("OpenCV JP2 decode failed.")
+    return cv2.cvtColor(bgr2, cv2.COLOR_BGR2RGB), buf.tobytes()  # (attacked_rgb, jp2_bytes)
+
+
 # ============================================
 # Capacity & minimum-size logic
 # ============================================
@@ -388,7 +420,7 @@ with tabs[2]:
         st.info("Please embed first in the **Embed** tab to run built-in attacks here.")
     else:
         wm_rgb = st.session_state["watermarked_rgb"]
-        sub = st.tabs(["JPEG Compression", "Small Cutouts"])
+        sub = st.tabs(["JPEG Compression", "JPEG 2000", "Small Cutouts"])
 
         # JPEG Attack
         with sub[0]:
@@ -433,9 +465,62 @@ with tabs[2]:
                         st.metric("BER (JPEG vs last embedded)", f"{ber_val:.4f}")
                     else:
                         st.info("To show BER here, run Extract with an original watermark first.")
+                        
+        # JPEG 2000 Attack
+        with sub[1]:
+            comp = st.slider("JPEG 2000 compression ×1000", 500, 8000, 2000, step=100, help="Higher = stronger compression")
+            if st.button("Run JPEG 2000 Attack"):
+                try:
+                    atk_rgb, jp2_bytes = jpeg2000_attack_mem(st.session_state["watermarked_rgb"], compression_x1000=int(comp))
+                except Exception as e:
+                    st.error(f"JPEG 2000 not available in this environment: {e}")
+                    st.stop()
+
+                atk_pil = np_rgb_to_pil(atk_rgb)
+                st.image(atk_pil, caption=f"JPEG 2000 (×1000={comp})", use_column_width=True)
+
+                # Optional: download the attacked JP2 file
+                st.download_button(
+                    "⬇️ Download attacked JP2",
+                    data=jp2_bytes,
+                    file_name=f"attack_jpeg2000_x{comp}.jp2",
+                    mime="image/jp2"
+                )
+
+                # Extract after JP2 attack
+                y_atk, _, _ = rgb_to_ycbcr_arrays(atk_pil)
+                bits_atk = extract_bits_y_multilevel_svd_qim(
+                    y_luma=y_atk,
+                    n_bits=WATERMARK_N * WATERMARK_N,
+                    secret_key=int(secret_key),
+                    quant_step=float(quant_step),
+                    svd_index=int(svd_index),
+                    svd_patch=((r0, r1), (c0, c1)),
+                    wavelet=wavelet,
+                    dwt_levels=int(dwt_levels),
+                    tiles=(int(tiles_r), int(tiles_c)),
+                    include_LL=bool(include_LL),
+                    include_D=bool(include_D),
+                )
+                wm_atk = np.array(bits_atk, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
+
+                colJ2k1, colJ2k2 = st.columns(2)
+                with colJ2k1:
+                    st.markdown("**Extracted (JPEG 2000)**")
+                    st.image((wm_atk * 255).astype(np.uint8), clamp=True, width=256)
+                with colJ2k2:
+                    if st.session_state.get("ref_wm_bits") is not None:
+                        ber_val, stats = bit_error_rate(st.session_state["ref_wm_bits"], bits_atk, return_counts=True)
+                        st.metric("BER (JPEG 2000)", f"{ber_val:.4f}")
+                        st.write(f"Accuracy: **{stats['accuracy']:.4f}**  |  Errors: **{stats['errors']}/{stats['total']}**")
+                    elif st.session_state.get("last_wm_bits") is not None:
+                        ber_val, stats = bit_error_rate(st.session_state["last_wm_bits"], bits_atk, return_counts=True)
+                        st.metric("BER (JPEG 2000 vs last embedded)", f"{ber_val:.4f}")
+                    else:
+                        st.info("To show BER here, run Extract with an original watermark first.")
 
         # Small Cutout Attack
-        with sub[1]:
+        with sub[2]:
             area = st.slider("Patch area ratio", 0.0001, 0.01, 0.001, step=0.0001, format="%.4f", key="arear")
             nump = st.slider("Number of patches", 1, 150, 50, key="nump")
             shape = st.selectbox("Shape", ["rect", "circle"], index=0, key="shape")
