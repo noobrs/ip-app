@@ -95,7 +95,6 @@ def np_image_download_button(img_pil: Image.Image, label: str, filename: str, un
     )
 
 
-
 # In-memory small cutout (like your helper but no disk I/O)
 def small_random_cutout_mem(
     in_rgb: np.ndarray,
@@ -217,22 +216,23 @@ def recommend_min_square_size(n_bits, wavelet, dwt_levels, tiles, include_LL, in
 st.set_page_config(page_title="SVD–QIM Watermarking Demo", layout="wide")
 st.title("🔐 SVD–QIM Watermarking (DWT–DCT–SVD, Σ-only QIM)")
 
-with st.sidebar:
-    st.subheader("Parameters")
-    st.caption("These must match between Embed and Extract.")
-    secret_key  = st.number_input("Secret key (int)", value=DEFAULT_SECRET, step=1)
-    quant_step  = st.slider("QIM quantization step (σₖ)", 10.0, 120.0, 80.0, step=1.0)
-    wavelet     = st.selectbox("Wavelet", ["haar","db2","db4","sym4","coif1"], index=0)
-    dwt_levels  = st.slider("DWT levels", 1, 4, 4, step=1)
-    tiles_r     = st.selectbox("Tiles (rows)", [1,2,3,4], index=1)
-    tiles_c     = st.selectbox("Tiles (cols)", [1,2,3,4], index=1)
-    include_LL  = st.checkbox("Include LL band", value=False)
-    include_D   = st.checkbox("Include Diagonal band (D)", value=False)
 
-    st.subheader("SVD patch")
-    svd_index   = st.selectbox("Singular value index k (0 = largest)", [0,1,2,3], index=0)
-    r0 = st.slider("Patch row start", 0, 7, 2); r1 = st.slider("Patch row end (exclusive)", r0+1, 8, 6)
-    c0 = st.slider("Patch col start", 0, 7, 2); c1 = st.slider("Patch col end (exclusive)", c0+1, 8, 6)
+# Set the constants
+quant_step = 80.0
+wavelet = "haar"
+dwt_levels = 4
+tiles_r = 2
+tiles_c = 2
+include_LL = False
+include_D = False
+svd_index = 0  # The index for the singular value to modify (0 = largest)
+r0 = 2  # Starting row index for the patch
+r1 = 6  # Ending row index (exclusive) for the patch
+c0 = 2  # Starting column index for the patch
+c1 = 6  # Ending column index (exclusive) for the patch
+
+secret_key  = st.number_input("Secret key (int)", value=DEFAULT_SECRET, step=1)
+
 
 tabs = st.tabs(["Embed", "Extract", "Attack", "Flow"])
 
@@ -243,6 +243,8 @@ if "last_wm_bits" not in st.session_state:
     st.session_state["last_wm_bits"] = None  # the bits actually embedded
 if "ref_wm_bits" not in st.session_state:
     st.session_state["ref_wm_bits"] = None   # user-provided original watermark for BER (Extract tab)
+
+# ...existing code... (rest of the tabs remain unchanged)
 
 # ==========================================================
 # TAB 1: EMBED
@@ -367,7 +369,7 @@ with tabs[0]:
                 use_container_width=False,
             )
     else:
-        st.info("No watermark yet — upload or draw one above to see a preview.")
+        st.info("No watermark yet — upload watermark to see preview.")
 
     # ==== EMBED ACTION ====
     # For Upload watermark → Embed button should appear below the preview.
@@ -533,7 +535,7 @@ with tabs[1]:
         key="oriwm_upl"
     )
     if not ori_wm_file:
-        st.info("No watermark yet — upload one above to see a preview.")
+        st.info("No watermark yet — upload watermark to see preview.")
 
     # Original watermark preview (crisp 32×32 if provided)
     ref_bits = None
@@ -619,22 +621,20 @@ with tabs[1]:
 # ==========================================================
 with tabs[2]:
     st.header("Attack")
-    # st.caption("Upload a watermarked image here, or use the last watermarked result from the Embed tab.")
-
-    # ---------- INPUT SECTION ----------
-    # Optional: use last embedded image if available
-    last_emb_np = st.session_state.get("watermarked_rgb", None)
-    has_last = last_emb_np is not None
 
     # Allow direct upload(s) for attack
+    st.markdown("### Attacked Image")
     atk_files = st.file_uploader(
-        "Upload one or more **watermarked** images (RGB formats)",
+        "Upload one or more watermarked images.",
         type=["png", "jpg", "jpeg", "webp", "bmp"],
         key="attack_upl_files",
         accept_multiple_files=True,
     )
 
-    # Previews (uploaded)
+    if not atk_files:
+        st.info("No watermarked images yet — upload one or more above to see previews.")
+
+    # Previews (uploaded watermarked images)
     atk_pils, atk_names = [], []
     if atk_files:
         st.markdown("**Uploaded watermarked image previews**")
@@ -646,10 +646,10 @@ with tabs[2]:
             except Exception as e:
                 st.warning(f"Failed to open {getattr(f,'name','file')}: {e}")
 
-        # Grid preview
+        # Display images in grid layout
         per_row = 3
         for i in range(0, len(atk_pils), per_row):
-            cols = st.columns(per_row, gap="medium")
+            cols = st.columns(per_row)
             for j, col in enumerate(cols):
                 idx = i + j
                 if idx >= len(atk_pils):
@@ -657,103 +657,95 @@ with tabs[2]:
                 with col:
                     pil = atk_pils[idx]
                     name = atk_names[idx]
-                    st.image(
-                        pil,
-                        use_column_width=True,
-                        caption=f"{name} • {pil.width}×{pil.height}px",
-                    )
-    # else:
-    #     st.info("No uploaded watermarked images yet — upload one or more above to see previews.")
+                    st.image(pil,  use_column_width=True, caption=f"{name} • {pil.width}×{pil.height}px",)
 
-    # Choose source image for attacks
-    source_options = []
-    source_map = {}  # label -> np_rgb
-    if has_last:
-        source_options.append("Last embedded result")
-        source_map["Last embedded result"] = last_emb_np
-    if atk_pils:
-        for i, (pil, nm) in enumerate(zip(atk_pils, atk_names), start=1):
-            label = f"Uploaded: {nm}"
-            source_options.append(label)
-            source_map[label] = pil_to_np_rgb(pil)
+    # ---------- Watermark preview (for BER comparison) ----------
+    st.markdown("### Watermark (for BER comparison)")
 
-    if not source_options:
-        st.info("No watermarked images yet — upload a watermarked image (above) or embed one in the Embed tab.")
-        st.stop()
-
-    chosen_label = st.selectbox("Choose the watermarked image to attack", source_options, index=0)
-    src_rgb = source_map[chosen_label]
-    src_pil = np_rgb_to_pil(src_rgb)
-
-    # Show the chosen source image nicely
-    st.markdown("**Selected source image**")
-    st.image(src_pil, use_column_width=False)
-
-    # Optional reference watermark for BER (falls back to Extract tab's reference if present)
-    st.markdown("### Reference watermark (optional, for BER)")
-    ori_wm_for_attack = st.file_uploader(
-        "Upload original watermark image (any size; will be binarized to 32×32) — optional",
+    ori_wm_file = st.file_uploader(
+        "Upload original watermark image (for BER, optional; will be binarized to 32×32)",
         type=["png", "jpg", "jpeg", "webp"],
-        key="attack_refwm_upl",
+        key="attack_refwm_upl"
     )
-
-    ref_bits = None
-    if st.session_state.get("ref_wm_bits") is not None:
-        # Use the one set from Extract tab if available
-        ref_bits = st.session_state["ref_wm_bits"]
-
-    if ori_wm_for_attack is not None:
+    if ori_wm_file:
         try:
-            p = Image.open(ori_wm_for_attack).convert("RGBA")
+            p = Image.open(ori_wm_file).convert("RGBA")
             bg = Image.new("RGBA", p.size, (255, 255, 255, 255))
             p_rgb = Image.alpha_composite(bg, p).convert("RGB")
             ori_bin = make_binary_watermark_from_pil(p_rgb, size=WATERMARK_N)
-            ref_bits = ori_bin.reshape(-1).tolist()
 
-            # Crisp preview
+            # Preview the original watermark (crisp 32×32)
             st.markdown("**Original watermark (32×32 binarized preview)**")
             big = Image.fromarray((ori_bin * 255).astype(np.uint8), mode="L").resize((256, 256), Image.NEAREST)
             st.image(big, clamp=True)
-            # Remember it (so other tabs can use it too)
+
+            # Store it for BER comparison
+            ref_bits = ori_bin.reshape(-1).tolist()
             st.session_state["ref_wm_bits"] = ref_bits
         except Exception as e:
             st.warning(f"Failed to read original watermark: {e}")
 
-    # ---------- ATTACK SUBTABS ----------
-    sub = st.tabs(["JPEG Compression", "JPEG 2000", "Small Cutouts"])
+    # ---------- Check if we have images to attack ----------
+    if not atk_pils:
+        st.info("Upload watermarked images above to perform attacks.")
+        st.stop()
+
+    # ---------- Attack Subtabs ----------
+    sub = st.tabs(["JPEG", "JPEG 2000", "Small Cutouts"])
 
     # JPEG Attack
     with sub[0]:
-        q = st.slider("JPEG quality", 10, 95, 75, step=1, key="jpegq_attack")
+        q = st.slider("JPEG quality", 10, 95, 75, step=1, key="jpegq")
         if st.button("Run JPEG Attack"):
-            buf = io.BytesIO()
-            np_rgb_to_pil(src_rgb).save(buf, format="JPEG", quality=q, subsampling=0, optimize=False)
-            buf.seek(0)
-            atk_pil = Image.open(buf).convert("RGB")
-            st.image(atk_pil, caption=f"JPEG q={q}", use_column_width=True)
+            st.markdown("### JPEG Attack Results")
 
-            # Extract after attack
-            y_atk, _, _ = rgb_to_ycbcr_arrays(atk_pil)
-            bits_atk = extract_bits_y_multilevel_svd_qim(
-                y_luma=y_atk,
-                n_bits=WATERMARK_N * WATERMARK_N,
-                secret_key=int(secret_key),
-                quant_step=float(quant_step),
-                svd_index=int(svd_index),
-                svd_patch=((r0, r1), (c0, c1)),
-                wavelet=wavelet,
-                dwt_levels=int(dwt_levels),
-                tiles=(int(tiles_r), int(tiles_c)),
-                include_LL=bool(include_LL),
-                include_D=bool(include_D),
-            )
-            wm_atk = np.array(bits_atk, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
+            attacked_images_jpeg = [];
+            
+            for idx, (pil, name) in enumerate(zip(atk_pils, atk_names), start=1):
+                st.markdown(f"#### Result #{idx}: `{name}`")
+                
+                # Convert to numpy and attack
+                src_rgb = pil_to_np_rgb(pil)
+                
+                # Compress the image with the chosen JPEG quality
+                buf = io.BytesIO()
+                pil.save(buf, format="JPEG", quality=q, subsampling=0, optimize=False)
+                buf.seek(0)
+                atk_pil = Image.open(buf).convert("RGB")
 
-            col5, col6 = st.columns(2, gap="large")
-            with col5:
-                st.markdown("**Extracted (JPEG)**")
-                st.image((wm_atk * 255).astype(np.uint8), clamp=True, width=256)
-            with col6:
+                out_name = f"{name.rsplit('.', 1)[0]}_jpeg_q{q}.png"
+                attacked_images_jpeg.append((out_name, atk_pil))
+
+                # Extract watermark from the attacked image
+                y_atk, _, _ = rgb_to_ycbcr_arrays(atk_pil)
+                bits_atk = extract_bits_y_multilevel_svd_qim(
+                    y_luma=y_atk,
+                    n_bits=WATERMARK_N * WATERMARK_N,
+                    secret_key=int(secret_key),
+                    quant_step=float(quant_step),
+                    svd_index=int(svd_index),
+                    svd_patch=((r0, r1), (c0, c1)),
+                    wavelet=wavelet,
+                    dwt_levels=int(dwt_levels),
+                    tiles=(int(tiles_r), int(tiles_c)),
+                    include_LL=bool(include_LL),
+                    include_D=bool(include_D),
+                )
+                wm_atk = np.array(bits_atk, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
+
+                # Show the results side by side
+                col1, col2 = st.columns(2, gap="large")
+                with col1:
+                    st.markdown("**Attacked Image (JPEG)**")
+                    st.image(atk_pil, use_column_width=True)
+                with col2:
+                    st.markdown("**Recovered 32×32 watermark**")
+                    rec_big = Image.fromarray((wm_atk * 255).astype(np.uint8), mode="L").resize(
+                        (256, 256), Image.NEAREST
+                    )
+                    st.image(rec_big, clamp=True)
+
+                # Compute and display BER
                 if ref_bits is not None:
                     ber_val, stats = bit_error_rate(ref_bits, bits_atk, return_counts=True)
                     st.metric("BER (JPEG)", f"{ber_val:.4f}")
@@ -762,50 +754,91 @@ with tabs[2]:
                     ber_val, stats = bit_error_rate(st.session_state["last_wm_bits"], bits_atk, return_counts=True)
                     st.metric("BER (JPEG vs last embedded)", f"{ber_val:.4f}")
                 else:
-                    st.info("To show BER here, upload a reference watermark (above) or run Extract with an original watermark.")
+                    st.info("Upload a reference watermark above to show BER.")
+                
+                # Download button for individual attacked image
+                np_image_download_button(
+                    atk_pil, 
+                    f"⬇️ Download JPEG attacked `{name}`", 
+                    f"{name.rsplit('.', 1)[0]}_jpeg_q{q}.png",
+                    unique_key=f"jpeg_download_{idx}_{q}"
+                )
+                st.markdown("---")
+
+            # Download All button (only if multiple images)
+            if len(attacked_images_jpeg) > 1:
+                zip_buffer = BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    for fname, pil_img in attacked_images_jpeg:
+                        img_bytes = BytesIO()
+                        pil_img.save(img_bytes, format="PNG")
+                        img_bytes.seek(0)
+                        zf.writestr(fname, img_bytes.read())
+                zip_buffer.seek(0)
+                st.download_button(
+                    "⬇️ Download ALL JPEG attacked images (ZIP)",
+                    data=zip_buffer,
+                    file_name=f"jpeg_attacked_batch_q{q}.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                )
 
     # JPEG 2000 Attack
     with sub[1]:
         comp = st.slider("JPEG 2000 compression ×1000", 500, 8000, 2000, step=100, help="Higher = stronger compression")
         if st.button("Run JPEG 2000 Attack"):
-            try:
-                atk_rgb, jp2_bytes = jpeg2000_attack_mem(src_rgb, compression_x1000=int(comp))
-            except Exception as e:
-                st.error(f"JPEG 2000 not available in this environment: {e}")
-                st.stop()
+            st.markdown("### JPEG 2000 Attack Results")
+            
+            # Store all attacked images for batch download
+            attacked_images_jp2 = []
+            
+            for idx, (pil, name) in enumerate(zip(atk_pils, atk_names), start=1):
+                st.markdown(f"#### Result #{idx}: `{name}`")
+                
+                src_rgb = pil_to_np_rgb(pil)
+                
+                try:
+                    atk_rgb, jp2_bytes = jpeg2000_attack_mem(src_rgb, compression_x1000=int(comp))
+                except Exception as e:
+                    st.error(f"JPEG 2000 not available for {name}: {e}")
+                    continue
 
-            atk_pil = np_rgb_to_pil(atk_rgb)
-            st.image(atk_pil, caption=f"JPEG 2000 (×1000={comp})", use_column_width=True)
+                atk_pil = np_rgb_to_pil(atk_rgb)
+                
+                # Store for batch download
+                out_name = f"{name.rsplit('.', 1)[0]}_jp2_c{comp}.png"
+                attacked_images_jp2.append((out_name, atk_pil))
 
-            st.download_button(
-                "⬇️ Download attacked JP2",
-                data=jp2_bytes,
-                file_name=f"attack_jpeg2000_x{comp}.jp2",
-                mime="image/jp2"
-            )
+                # Extract watermark from the attacked image
+                y_atk, _, _ = rgb_to_ycbcr_arrays(atk_pil)
+                bits_atk = extract_bits_y_multilevel_svd_qim(
+                    y_luma=y_atk,
+                    n_bits=WATERMARK_N * WATERMARK_N,
+                    secret_key=int(secret_key),
+                    quant_step=float(quant_step),
+                    svd_index=int(svd_index),
+                    svd_patch=((r0, r1), (c0, c1)),
+                    wavelet=wavelet,
+                    dwt_levels=int(dwt_levels),
+                    tiles=(int(tiles_r), int(tiles_c)),
+                    include_LL=bool(include_LL),
+                    include_D=bool(include_D),
+                )
+                wm_atk = np.array(bits_atk, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
 
-            # Extract after JP2 attack
-            y_atk, _, _ = rgb_to_ycbcr_arrays(atk_pil)
-            bits_atk = extract_bits_y_multilevel_svd_qim(
-                y_luma=y_atk,
-                n_bits=WATERMARK_N * WATERMARK_N,
-                secret_key=int(secret_key),
-                quant_step=float(quant_step),
-                svd_index=int(svd_index),
-                svd_patch=((r0, r1), (c0, c1)),
-                wavelet=wavelet,
-                dwt_levels=int(dwt_levels),
-                tiles=(int(tiles_r), int(tiles_c)),
-                include_LL=bool(include_LL),
-                include_D=bool(include_D),
-            )
-            wm_atk = np.array(bits_atk, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
+                # Show results
+                colJ2k1, colJ2k2 = st.columns(2, gap="large")
+                with colJ2k1:
+                    st.markdown("**Attacked Image (JPEG 2000)**")
+                    st.image(atk_pil, use_column_width=True)
+                with colJ2k2:
+                    st.markdown("**Recovered 32×32 watermark**")
+                    rec_big = Image.fromarray((wm_atk * 255).astype(np.uint8), mode="L").resize(
+                        (256, 256), Image.NEAREST
+                    )
+                    st.image(rec_big, clamp=True)
 
-            colJ2k1, colJ2k2 = st.columns(2, gap="large")
-            with colJ2k1:
-                st.markdown("**Extracted (JPEG 2000)**")
-                st.image((wm_atk * 255).astype(np.uint8), clamp=True, width=256)
-            with colJ2k2:
+                # Compute and display BER
                 if ref_bits is not None:
                     ber_val, stats = bit_error_rate(ref_bits, bits_atk, return_counts=True)
                     st.metric("BER (JPEG 2000)", f"{ber_val:.4f}")
@@ -814,7 +847,34 @@ with tabs[2]:
                     ber_val, stats = bit_error_rate(st.session_state["last_wm_bits"], bits_atk, return_counts=True)
                     st.metric("BER (JPEG 2000 vs last embedded)", f"{ber_val:.4f}")
                 else:
-                    st.info("To show BER here, upload a reference watermark (above) or run Extract with an original watermark.")
+                    st.info("Upload a reference watermark above to show BER.")
+
+                # Download button for individual attacked image
+                np_image_download_button(
+                    atk_pil, 
+                    f"⬇️ Download JPEG2000 attacked `{name}`", 
+                    out_name,
+                    unique_key=f"jp2_download_{idx}_{comp}"
+                )
+                st.markdown("---")
+
+            # Download All button (only if multiple images)
+            if len(attacked_images_jp2) > 1:
+                zip_buffer = BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    for fname, pil_img in attacked_images_jp2:
+                        img_bytes = BytesIO()
+                        pil_img.save(img_bytes, format="PNG")
+                        img_bytes.seek(0)
+                        zf.writestr(fname, img_bytes.read())
+                zip_buffer.seek(0)
+                st.download_button(
+                    "⬇️ Download ALL JPEG2000 attacked images (ZIP)",
+                    data=zip_buffer,
+                    file_name=f"jpeg2000_attacked_batch_c{comp}.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                )
 
     # Small Cutout Attack
     with sub[2]:
@@ -825,35 +885,56 @@ with tabs[2]:
         blur_k = st.slider("Blur kernel (odd)", 3, 31, 11, step=2, key="blurk_attack")
 
         if st.button("Run Small Cutout Attack"):
-            atk_rgb = small_random_cutout_mem(
-                in_rgb=src_rgb, area_ratio=float(area), num_patches=int(nump),
-                shape=shape, fill=fill, blur_kernel=int(blur_k), seed=int(secret_key)
-            )
-            atk_pil = np_rgb_to_pil(atk_rgb)
-            st.image(atk_pil, caption=f"Small cutouts ({nump} patches, {area:.4f} area each)", use_column_width=True)
+            st.markdown("### Small Cutout Attack Results")
+            
+            # Store all attacked images for batch download
+            attacked_images_cutout = []
+            
+            for idx, (pil, name) in enumerate(zip(atk_pils, atk_names), start=1):
+                st.markdown(f"#### Result #{idx}: `{name}`")
+                
+                src_rgb = pil_to_np_rgb(pil)
+                
+                atk_rgb = small_random_cutout_mem(
+                    in_rgb=src_rgb, area_ratio=float(area), num_patches=int(nump),
+                    shape=shape, fill=fill, blur_kernel=int(blur_k), seed=int(secret_key)
+                )
+                atk_pil = np_rgb_to_pil(atk_rgb)
+                
+                # Store for batch download
+                out_name = f"{name.rsplit('.', 1)[0]}_cutout_a{area}_n{nump}.png"
+                attacked_images_cutout.append((out_name, atk_pil))
 
-            # Extract after attack
-            y_atk, _, _ = rgb_to_ycbcr_arrays(atk_pil)
-            bits_atk = extract_bits_y_multilevel_svd_qim(
-                y_luma=y_atk,
-                n_bits=WATERMARK_N * WATERMARK_N,
-                secret_key=int(secret_key),
-                quant_step=float(quant_step),
-                svd_index=int(svd_index),
-                svd_patch=((r0, r1), (c0, c1)),
-                wavelet=wavelet,
-                dwt_levels=int(dwt_levels),
-                tiles=(int(tiles_r), int(tiles_c)),
-                include_LL=bool(include_LL),
-                include_D=bool(include_D),
-            )
-            wm_atk = np.array(bits_atk, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
+                # Extract watermark from the attacked image
+                y_atk, _, _ = rgb_to_ycbcr_arrays(atk_pil)
+                bits_atk = extract_bits_y_multilevel_svd_qim(
+                    y_luma=y_atk,
+                    n_bits=WATERMARK_N * WATERMARK_N,
+                    secret_key=int(secret_key),
+                    quant_step=float(quant_step),
+                    svd_index=int(svd_index),
+                    svd_patch=((r0, r1), (c0, c1)),
+                    wavelet=wavelet,
+                    dwt_levels=int(dwt_levels),
+                    tiles=(int(tiles_r), int(tiles_c)),
+                    include_LL=bool(include_LL),
+                    include_D=bool(include_D),
+                )
+                wm_atk = np.array(bits_atk, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
 
-            col7, col8 = st.columns(2, gap="large")
-            with col7:
-                st.markdown("**Extracted (Small Cutouts)**")
-                st.image((wm_atk * 255).astype(np.uint8), clamp=True, width=256)
-            with col8:
+                # Show results
+                col7, col8 = st.columns(2, gap="large")
+                with col7:
+                    st.markdown("**Attacked Image (Cutouts)**")
+                    st.image(atk_pil, use_column_width=True)
+                with col8:
+                    st.markdown("**Recovered 32×32 watermark**")
+                    rec_big = Image.fromarray((wm_atk * 255).astype(np.uint8), mode="L").resize(
+                        (256, 256), Image.NEAREST
+                    )
+                    st.image(rec_big, clamp=True)
+
+                # Compute and display BER
                 if ref_bits is not None:
                     ber_val, stats = bit_error_rate(ref_bits, bits_atk, return_counts=True)
                     st.metric("BER (Cutouts)", f"{ber_val:.4f}")
@@ -862,7 +943,36 @@ with tabs[2]:
                     ber_val, stats = bit_error_rate(st.session_state["last_wm_bits"], bits_atk, return_counts=True)
                     st.metric("BER (Cutouts vs last embedded)", f"{ber_val:.4f}")
                 else:
-                    st.info("To show BER here, upload a reference watermark (above) or run Extract with an original watermark.")
+                    st.info("Upload a reference watermark above to show BER.")
+
+                # Download button for individual attacked image
+                np_image_download_button(
+                    atk_pil, 
+                    f"⬇️ Download Cutout attacked `{name}`", 
+                    out_name,
+                    unique_key=f"cutout_download_{idx}_{area}_{nump}"
+                )
+                st.markdown("---")
+
+            # Download All button (only if multiple images)
+            if len(attacked_images_cutout) > 1:
+                zip_buffer = BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    for fname, pil_img in attacked_images_cutout:
+                        img_bytes = BytesIO()
+                        pil_img.save(img_bytes, format="PNG")
+                        img_bytes.seek(0)
+                        zf.writestr(fname, img_bytes.read())
+                zip_buffer.seek(0)
+                st.download_button(
+                    "⬇️ Download ALL Cutout attacked images (ZIP)",
+                    data=zip_buffer,
+                    file_name=f"cutout_attacked_batch_a{area}_n{nump}.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                )
+
+
 
 
 # ==========================================================
