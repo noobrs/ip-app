@@ -5,3 +5,4 @@ opencv-python-headless
 PyWavelets
 scipy
 graphviz
+streamlit-drawable-canvas
