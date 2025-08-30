@@ -103,7 +103,7 @@ with tabs[0]:
                 with col:
                     st.image(
                         pil,
-                        use_column_width=True,
+                        use_container_width=True,
                         caption=f"{name} • {pil.width}×{pil.height}px",
                     )
 
@@ -211,10 +211,10 @@ with tabs[0]:
                 col_a, col_b = st.columns(2, gap="large")
                 with col_a:
                     st.markdown("**Original**")
-                    st.image(hp, use_column_width=True)
+                    st.image(hp, use_container_width=True)
                 with col_b:
                     st.markdown("**Watermarked**")
-                    st.image(wm_rgb_pil, use_column_width=True)
+                    st.image(wm_rgb_pil, use_container_width=True)
 
                 psnr_val = utils.psnr(host_rgb, wm_rgb)
                 st.metric("PSNR (Original vs Watermarked)", f"{psnr_val:.2f} dB")
@@ -288,7 +288,7 @@ with tabs[1]:
                     name = atk_names_preview[idx]
                     st.image(
                         pil,
-                        use_column_width=True,
+                        use_container_width=True,
                         caption=f"{name} • {pil.width}×{pil.height}px",
                     )
 
@@ -350,7 +350,7 @@ with tabs[1]:
             col1, col2 = st.columns(2, gap="large")
             with col1:
                 st.markdown("**Source image**")
-                st.image(atk_pils[idx-1], use_column_width=True)
+                st.image(atk_pils[idx-1], use_container_width=True)
             with col2:
                 st.markdown("**Recovered watermark**")
                 # crisp recovered preview
@@ -426,14 +426,14 @@ with tabs[2]:
                     st.markdown("**Original**")
                     st.image(
                         pil,
-                        use_column_width=True,
+                        use_container_width=True,
                         caption=f"Original • {pil.width}×{pil.height}px"
                     )
                 with col2:
                     st.markdown(f"**JPEG Quality {jpeg_quality}**")
                     st.image(
                         jpeg_attacked_pil,
-                        use_column_width=True,
+                        use_container_width=True,
                         caption=f"JPEG Q{jpeg_quality} • {jpeg_attacked_pil.width}×{jpeg_attacked_pil.height}px"
                     )
                 
@@ -523,14 +523,14 @@ with tabs[2]:
                     st.markdown("**Original**")
                     st.image(
                         pil,
-                        use_column_width=True,
+                        use_container_width=True,
                         caption=f"Original • {pil.width}×{pil.height}px"
                     )
                 with col2:
                     st.markdown(f"**Cropped (Area: {area_ratio:.4f}, Patches: {num_patches}, Seed: {seed})**")
                     st.image(
                         cropping_attacked_pil,
-                        use_column_width=True,
+                        use_container_width=True,
                         caption=f"Cropped • {cropping_attacked_pil.width}×{cropping_attacked_pil.height}px"
                     )
                 
