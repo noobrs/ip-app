@@ -1,7 +1,8 @@
 streamlit
+streamlit-drawable-canvas
 numpy
-Pillow
-opencv-python-headless
-PyWavelets
+pillow
+opencv-python
+pywavelets
 scipy
 graphviz
