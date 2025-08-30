@@ -1,6 +1,6 @@
 import numpy as np
 from PIL import Image
-import utils
+import utilities
 from parameters import WATERMARK_SIZE, DWT_LEVELS, QIM_STEP
 
 # =========================
@@ -24,15 +24,15 @@ def embed_watermark(y_luma, wm_bits_2d):
     y_pad = np.pad(y_luma, ((0, Hp - H0), (0, Wp - W0)), mode='edge')
 
     # DWT
-    coeffs = utils.dwt2_levels(y_pad, DWT_LEVELS)
-    detail_bands = utils.get_detail_bands_all_levels(coeffs)
+    coeffs = utilities.dwt2_levels(y_pad, DWT_LEVELS)
+    detail_bands = utilities.get_detail_bands_all_levels(coeffs)
 
     wm_bits = wm_bits_2d.astype(np.uint8).ravel()
     n_bits  = wm_bits.size
 
     for lvl, tag, band in detail_bands:
         # DCT over the entire band (single region)
-        D, Hb, Wb = utils.dct_blocks_8x8(band)
+        D, Hb, Wb = utilities.dct_blocks_8x8(band)
         H8, W8 = D.shape
         n_rows, n_cols = H8 // 8, W8 // 8
         n_blocks = n_rows * n_cols
@@ -45,18 +45,18 @@ def embed_watermark(y_luma, wm_bits_2d):
             bit_index = int(assign[k])
             r = k // n_cols; c = k % n_cols
             i, j = r * 8, c * 8
-            utils.svd_qim_embed_in_block(
+            utilities.svd_qim_embed_in_block(
                 D[i:i+8, j:j+8],
                 int(wm_bits[bit_index]),
                 QIM_STEP
             )
 
         # Write back the modified band
-        band[:] = utils.idct_blocks_8x8(D, Hb, Wb)
-        utils.set_detail_band(coeffs, lvl, tag, band)
+        band[:] = utilities.idct_blocks_8x8(D, Hb, Wb)
+        utilities.set_detail_band(coeffs, lvl, tag, band)
 
     # Inverse DWT and crop back to original size
-    y_wm_pad = utils.idwt2_levels(coeffs)
+    y_wm_pad = utilities.idwt2_levels(coeffs)
     return y_wm_pad[:H0, :W0]
 
 # =========================
@@ -73,14 +73,14 @@ def extract_watermark(y_luma, wm_size=WATERMARK_SIZE):
     Wp = (W0 + mult - 1) // mult * mult
     y_pad = np.pad(y_luma, ((0, Hp - H0), (0, Wp - W0)), mode='edge')
 
-    coeffs = utils.dwt2_levels(y_pad, DWT_LEVELS)
-    detail_bands = utils.get_detail_bands_all_levels(coeffs)
+    coeffs = utilities.dwt2_levels(y_pad, DWT_LEVELS)
+    detail_bands = utilities.get_detail_bands_all_levels(coeffs)
 
     n_bits = wm_size * wm_size
     soft_sum = np.zeros(n_bits, dtype=np.float64)
 
     for lvl, tag, band in detail_bands:
-        D, Hb, Wb = utils.dct_blocks_8x8(band)
+        D, Hb, Wb = utilities.dct_blocks_8x8(band)
         H8, W8 = D.shape
         n_rows, n_cols = H8 // 8, W8 // 8
         n_blocks = n_rows * n_cols
@@ -91,7 +91,7 @@ def extract_watermark(y_luma, wm_size=WATERMARK_SIZE):
         for k in range(n_blocks):
             r = k // n_cols; c = k % n_cols
             i, j = r * 8, c * 8
-            llr = utils.svd_qim_llr_from_block(
+            llr = utilities.svd_qim_llr_from_block(
                 D[i:i+8, j:j+8],
                 QIM_STEP
             )

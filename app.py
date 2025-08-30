@@ -6,7 +6,7 @@ from streamlit_drawable_canvas import st_canvas
 from io import BytesIO
 import zipfile
 
-import watermarking, utils, attacks, parameters
+import watermarking, utilities, attacks, parameters
 
 # Hide only the built-in "Send to Streamlit" download button in st_canvas
 st.markdown("""
@@ -116,7 +116,7 @@ with tabs[0]:
             key="wm_upl"
         )
         if wm_file is not None:
-            wm_bits = utils.prepare_watermark_bits(Image.open(wm_file), size=parameters.WATERMARK_SIZE)
+            wm_bits = utilities.prepare_watermark_bits(Image.open(wm_file), size=parameters.WATERMARK_SIZE)
 
     else:  # Draw watermark
         st.info("Draw in black on a white canvas. The drawing is binarized to 32×32.")
@@ -130,7 +130,7 @@ with tabs[0]:
             key="wm_canvas",
         )
         if canvas and canvas.image_data is not None:
-            wm_bits = utils.prepare_watermark_bits(Image.fromarray(canvas.image_data.astype(np.uint8)), size=parameters.WATERMARK_SIZE)
+            wm_bits = utilities.prepare_watermark_bits(Image.fromarray(canvas.image_data.astype(np.uint8)), size=parameters.WATERMARK_SIZE)
 
     # ==== WATERMARK PREVIEW (crisp 32×32, header only when present) ====
     bits_for_preview = None
@@ -178,7 +178,7 @@ with tabs[0]:
             # Convert all hosts to YCbCr arrays
             y_wm_list, y_list, cb_list, cr_list = [], [], [], []
             for hp in host_pils:
-                y, cb, cr = utils.to_ycbcr_arrays(hp)
+                y, cb, cr = utilities.to_ycbcr_arrays(hp)
                 y_list.append(y); cb_list.append(cb); cr_list.append(cr)
                 y_wm_list.append(watermarking.embed_watermark(y, wm_bits))
 
@@ -189,12 +189,12 @@ with tabs[0]:
 
             watermarked_files = []
             for idx, (hp, y_wm, cb, cr, name) in enumerate(zip(host_pils, y_wm_list, cb_list, cr_list, host_names), start=1):
-                wm_rgb_pil = utils.from_ycbcr_arrays(y_wm, cb, cr)
+                wm_rgb_pil = utilities.from_ycbcr_arrays(y_wm, cb, cr)
                 out_name = f"{name.rsplit('.',1)[0]}_watermarked.png"
                 watermarked_files.append((out_name, wm_rgb_pil))
 
-                wm_rgb = utils.pil_to_np_rgb(wm_rgb_pil)
-                host_rgb = utils.pil_to_np_rgb(hp)
+                wm_rgb = utilities.pil_to_np_rgb(wm_rgb_pil)
+                host_rgb = utilities.pil_to_np_rgb(hp)
 
                 unique_key = f"download_{name}_{idx}"  # Unique key for each download button
 
@@ -212,7 +212,7 @@ with tabs[0]:
                     st.markdown("**Watermarked**")
                     st.image(wm_rgb_pil, use_container_width=True)
 
-                psnr_val = utils.psnr(host_rgb, wm_rgb)
+                psnr_val = utilities.psnr(host_rgb, wm_rgb)
                 st.metric("PSNR (Original vs Watermarked)", f"{psnr_val:.2f} dB")
                 np_image_download_button(
                     wm_rgb_pil,
@@ -309,7 +309,7 @@ with tabs[1]:
             ori_rgb = Image.alpha_composite(bg, ori_pil).convert("RGB")
 
             # binarize to 32×32 using your helper
-            ori_wm_bin = utils.prepare_watermark_bits(ori_rgb, size=parameters.WATERMARK_SIZE)
+            ori_wm_bin = utilities.prepare_watermark_bits(ori_rgb, size=parameters.WATERMARK_SIZE)
             ref_bits = ori_wm_bin.reshape(-1).tolist()
 
             # crisp preview (nearest neighbor upscale)
@@ -334,7 +334,7 @@ with tabs[1]:
             pil_img = Image.open(f).convert("RGB")
             atk_pils.append(pil_img)
             atk_names.append(getattr(f, "name", "watermarked.png"))
-            y, _, _ = utils.to_ycbcr_arrays(pil_img)
+            y, _, _ = utilities.to_ycbcr_arrays(pil_img)
             y_list.append(y)
             # extract bits
             bits_list.append(watermarking.extract_watermark(y))
@@ -356,7 +356,7 @@ with tabs[1]:
                 st.image(rec_big, clamp=True)
 
             if ref_bits is not None:
-                ber_val, stats = utils.bit_error_rate(ref_bits, bits_out, return_counts=True)
+                ber_val, stats = utilities.bit_error_rate(ref_bits, bits_out, return_counts=True)
                 st.metric("BER", f"{ber_val:.4f}")
                 st.write(f"Accuracy: **{stats['accuracy']:.4f}**  |  Errors: **{stats['errors']}/{stats['total']}**")
             else:
