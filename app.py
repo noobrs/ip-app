@@ -6,7 +6,7 @@ from streamlit_drawable_canvas import st_canvas
 from io import BytesIO
 import zipfile
 
-from . import watermarking, utils, attacks, parameters
+import watermarking, utils, attacks, parameters
 
 # Hide only the built-in "Send to Streamlit" download button in st_canvas
 st.markdown("""
