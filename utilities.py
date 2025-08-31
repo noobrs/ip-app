@@ -18,11 +18,42 @@ def psnr(img_a_u8, img_b_u8):
 # =========================
 # BER
 # =========================
-def bit_error_rate(true_bits_u8, pred_bits_u8):
+def bit_error_rate(true_bits_u8, pred_bits_u8, return_counts=False):
     true_bits_u8 = np.asarray(true_bits_u8).astype(np.uint8).ravel()
     pred_bits_u8 = np.asarray(pred_bits_u8).astype(np.uint8).ravel()
     assert true_bits_u8.size == pred_bits_u8.size, "Mismatch in bit lengths."
-    return np.count_nonzero(true_bits_u8 ^ pred_bits_u8) / true_bits_u8.size
+    
+    errors = np.count_nonzero(true_bits_u8 ^ pred_bits_u8)
+    total = true_bits_u8.size
+    ber = errors / total
+    
+    if return_counts:
+        accuracy = 1.0 - ber
+        return ber, {"errors": errors, "total": total, "accuracy": accuracy}
+    return ber
+
+# =========================
+# NCC
+# =========================
+def normalized_cross_correlation(true_bits_u8, pred_bits_u8):
+    """Compute Normalized Cross-Correlation between two binary watermarks."""
+    true_bits_u8 = np.asarray(true_bits_u8).astype(np.float64).ravel()
+    pred_bits_u8 = np.asarray(pred_bits_u8).astype(np.float64).ravel()
+    assert true_bits_u8.size == pred_bits_u8.size, "Mismatch in bit lengths."
+    
+    # Center the data (subtract mean)
+    true_centered = true_bits_u8 - np.mean(true_bits_u8)
+    pred_centered = pred_bits_u8 - np.mean(pred_bits_u8)
+    
+    # Compute NCC
+    numerator = np.sum(true_centered * pred_centered)
+    denominator = np.sqrt(np.sum(true_centered**2) * np.sum(pred_centered**2))
+    
+    # Avoid division by zero
+    if denominator == 0:
+        return 0.0
+    
+    return numerator / denominator
 
 # =========================
 # Image Conversion
@@ -48,6 +79,21 @@ def pil_to_np_rgb(img: Image.Image) -> np.ndarray:
 
 def np_rgb_to_pil(arr: np.ndarray) -> Image.Image:
     return Image.fromarray(arr.astype(np.uint8), mode="RGB")
+
+def to_pil_luma(y):
+    """Ensure we have a single-channel PIL Image in 'L' mode."""
+    if isinstance(y, Image.Image):
+        return y.convert('L')
+    arr = np.asarray(y)
+    if arr.ndim != 2:
+        raise ValueError("y_luma must be 2D (single-channel).")
+    # Normalize dtype for PIL
+    if arr.dtype != np.uint8:
+        if arr.max() <= 1.0:
+            arr = (arr * 255.0).round().clip(0, 255).astype(np.uint8)
+        else:
+            arr = np.round(arr).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(arr, mode='L')
 
 # =========================
 # Convert Watermark into Binary

@@ -4,7 +4,7 @@ import utilities
 from parameters import WATERMARK_SIZE, DWT_LEVELS, QIM_STEP
 
 # =========================
-# Embedding (Y channel only)
+# Embedding
 # =========================
 def embed_watermark(y_luma, wm_bits_2d):
     """
@@ -60,9 +60,9 @@ def embed_watermark(y_luma, wm_bits_2d):
     return y_wm_pad[:H0, :W0]
 
 # =========================
-# Extraction (blind)
+# Extraction (Main)
 # =========================
-def extract_watermark(y_luma, wm_size=WATERMARK_SIZE):
+def extract_watermark(y_luma, wm_size=WATERMARK_SIZE, return_score=False):
     """
     Recreate the same deterministic round-robin mapping and do soft voting.
     """
@@ -98,24 +98,30 @@ def extract_watermark(y_luma, wm_size=WATERMARK_SIZE):
             soft_sum[int(assign[k])] += llr
 
     bits = (soft_sum >= 0).astype(np.uint8)
+
+    # for rotation enhancement
+    if return_score:
+        return bits.reshape(wm_size, wm_size), float(np.sum(np.abs(soft_sum)))
+    
     return bits.reshape(wm_size, wm_size)
 
-# =========================
-# High-level convenience I/O
-# =========================
-# def embed_watermark(host_path, wm_path, out_path="watermarked.png"):
-#     """Embed watermark image into host image file and save the watermarked RGB."""
-#     rgb = Image.open(host_path).convert("RGB")
-#     Y, Cb, Cr = utils.to_ycbcr_arrays(rgb)
-#     wm_bits = utils.prepare_watermark_bits(wm_path, WATERMARK_SIZE)
-#     Y_wm = embed_watermark_y(Y, wm_bits)
-#     out_rgb = utils.from_ycbcr_arrays(Y_wm, Cb, Cr)
-#     out_rgb.save(out_path)
-#     return np.array(rgb, dtype=np.uint8), np.array(out_rgb, dtype=np.uint8), wm_bits
+# =======================================
+# Extraction (Enhanced for small rotation)
+# =======================================
+def extract_watermark_enhanced(y_luma, wm_size=WATERMARK_SIZE, angle_range=(-5, 5), step=0.5):
+    """
+    Brute-force small rotation search around 0°.
+    Accepts y_luma as np.ndarray (H×W) or PIL.Image.
+    """
+    y_img = utilities.to_pil_luma(y_luma)
 
-# def extract_watermark(image_path, wm_size=WATERMARK_SIZE):
-#     """Extract watermark bits (wm_size×wm_size) from a watermarked/attacked image file."""
-#     rgb = Image.open(image_path).convert("RGB")
-#     Y, _, _ = utils.to_ycbcr_arrays(rgb)
-#     wm_bits = extract_watermark_y(Y, wm_size)
-#     return wm_bits
+    best_bits, best_score = None, -np.inf
+    angles = np.arange(angle_range[0], angle_range[1] + 1e-9, step, dtype=float)
+    for ang in angles:
+        # rotate expects PIL; extractor likely expects np.ndarray → convert back
+        rot_img = y_img.rotate(float(ang), resample=Image.BICUBIC, expand=False)
+        rot_arr = np.asarray(rot_img)
+        bits, score = extract_watermark(rot_arr, wm_size, return_score=True)
+        if score > best_score:
+            best_score, best_bits = score, bits
+    return best_bits

@@ -26,3 +26,14 @@ def crop_attack(in_arr, area_ratio=0.01, num_patches=2, seed=42):
         in_arr[mask == 255] = 0
 
     return Image.fromarray(in_arr)
+
+# =========================
+# Rotation Attack
+# =========================
+def rotation_attack(pil_img, angle=5.0, fill_color=(255, 255, 255)):
+    """
+    Rotate image by given angle in degrees.
+    Positive angle = clockwise rotation.
+    Fill color is used for areas outside the original image boundaries.
+    """
+    return pil_img.rotate(angle, resample=Image.BICUBIC, expand=False, fillcolor=fill_color)
