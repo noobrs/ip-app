@@ -303,7 +303,7 @@ def tab_embed():
 # TAB 2: EXTRACT
 # ----------------------------
 def tab_extract():
-    st.header("Extract Watermark(s)")
+    st.header("Extract Watermark")
 
     # --- Upload attacked/watermarked inputs ---
     st.markdown("### Watermarked Images")
