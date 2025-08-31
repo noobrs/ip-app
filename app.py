@@ -243,61 +243,60 @@ def tab_embed():
     else:
         st.info("No watermark yet — upload or draw to see preview.")
 
-    # --- EMBED ACTION ---
-    if st.button("Embed", key="embed_button"):
-        hosts_b = st.session_state.embed["host_bytes"]
-        wm_bits_s = st.session_state.embed["wm_bits"]
-        if wm_bits_s is None or len(hosts_b) == 0:
-            st.warning("Please provide a watermark and at least one host image.")
-            st.stop()
+        # --- EMBED ACTION ---
+    if (len(st.session_state.embed["host_bytes"]) > 0) and (st.session_state.embed["wm_bits"] is not None):
+        if st.button("Embed", key="embed_button"):
+            hosts_b = st.session_state.embed["host_bytes"]
+            wm_bits_s = st.session_state.embed["wm_bits"]
 
-        out_pairs = []  # (filename, bytes)
-        for name, hb in zip(st.session_state.embed["host_names"], hosts_b):
-            hp = bytes_to_pil(hb)
-            y, cb, cr = utilities.to_ycbcr_arrays(hp)
-            y_wm = watermarking.embed_watermark(y, wm_bits_s)
-            wm_rgb_pil = utilities.from_ycbcr_arrays(y_wm, cb, cr)
-            out_name = f"{name.rsplit('.',1)[0]}_watermarked.png"
-            out_pairs.append((out_name, pil_to_bytes(wm_rgb_pil, "PNG")))
+            out_pairs = []  # (filename, bytes)
+            for name, hb in zip(st.session_state.embed["host_names"], hosts_b):
+                hp = bytes_to_pil(hb)
+                y, cb, cr = utilities.to_ycbcr_arrays(hp)
+                y_wm = watermarking.embed_watermark(y, wm_bits_s)
+                wm_rgb_pil = utilities.from_ycbcr_arrays(y_wm, cb, cr)
+                out_name = f"{name.rsplit('.',1)[0]}_watermarked.png"
+                out_pairs.append((out_name, pil_to_bytes(wm_rgb_pil, "PNG")))
 
-            # Show side-by-side + PSNR + download
-            col_a, col_b = st.columns(2, gap="large")
-            with col_a:
-                st.markdown("**Original**")
-                st.image(get_preview_image(hp))
-            with col_b:
-                st.markdown("**Watermarked**")
-                st.image(get_preview_image(wm_rgb_pil))
+                # Show side-by-side + PSNR + download
+                col_a, col_b = st.columns(2, gap="large")
+                with col_a:
+                    st.markdown("**Original**")
+                    st.image(get_preview_image(hp))
+                with col_b:
+                    st.markdown("**Watermarked**")
+                    st.image(get_preview_image(wm_rgb_pil))
 
-            psnr_val = utilities.psnr(utilities.pil_to_np_rgb(hp), utilities.pil_to_np_rgb(wm_rgb_pil))
-            st.metric("PSNR (Original vs Watermarked)", f"{psnr_val:.2f} dB")
-            st.download_button(
-                f"Download `{name}` (watermarked)",
-                data=out_pairs[-1][1],
-                file_name=out_name,
-                mime="image/png",
-                use_container_width=False,
-                key=f"dl_wm_{name}"
-            )
-            st.markdown("---")
+                psnr_val = utilities.psnr(utilities.pil_to_np_rgb(hp), utilities.pil_to_np_rgb(wm_rgb_pil))
+                st.metric("PSNR (Original vs Watermarked)", f"{psnr_val:.2f} dB")
+                st.download_button(
+                    f"Download `{name}` (watermarked)",
+                    data=out_pairs[-1][1],
+                    file_name=out_name,
+                    mime="image/png",
+                    use_container_width=False,
+                    key=f"dl_wm_{name}"
+                )
+                st.markdown("---")
 
-        # Persist batch for optional ZIP
-        st.session_state.embed["watermarked"] = out_pairs
+            # Persist batch for optional ZIP
+            st.session_state.embed["watermarked"] = out_pairs
 
-        if len(out_pairs) > 1:
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for fname, b in out_pairs:
-                    zf.writestr(fname, b)
-            zip_buffer.seek(0)
-            st.download_button(
-                "Download ALL watermarked images (ZIP)",
-                data=zip_buffer,
-                file_name="watermarked_batch.zip",
-                mime="application/zip",
-                use_container_width=True,
-                key="dl_zip_embed"
-            )
+            if len(out_pairs) > 1:
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    for fname, b in out_pairs:
+                        zf.writestr(fname, b)
+                zip_buffer.seek(0)
+                st.download_button(
+                    "Download ALL watermarked images (ZIP)",
+                    data=zip_buffer,
+                    file_name="watermarked_batch.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    key="dl_zip_embed"
+                )
+
 
 # ----------------------------
 # TAB 2: EXTRACT
@@ -369,6 +368,9 @@ def tab_extract():
             st.warning(f"Failed to read original watermark: {e}")
             st.session_state.extract["ref_bits"] = None
 
+    else:
+        st.info("No watermark yet — upload or draw to see preview.")
+
     # --- EXTRACTION METHOD SELECTION ---
     st.markdown("### Extraction Method")
     extract_method = st.radio(
@@ -377,127 +379,117 @@ def tab_extract():
         horizontal=True,
         key="extract_method_select"
     )
+    
 
-    # --- EXTRACT ACTION ---
-    if st.button("Extract", key="extract_button"):
-        if len(st.session_state.extract["atk_bytes"]) == 0:
-            st.warning("Please upload at least one watermarked image.")
-            st.stop()
+        # --- EXTRACT ACTION ---
+    # Show the button only when at least one attacked/watermarked image is uploaded
+    if len(st.session_state.extract["atk_bytes"]) > 0:
+        if st.button("Extract", key="extract_button"):
+            results = []
+            for name, b in zip(st.session_state.extract["atk_names"], st.session_state.extract["atk_bytes"]):
+                pil_img = bytes_to_pil(b)
+                y, _, _ = utilities.to_ycbcr_arrays(pil_img)
 
-        results = []
-        for name, b in zip(st.session_state.extract["atk_names"], st.session_state.extract["atk_bytes"]):
-            pil_img = bytes_to_pil(b)
-            y, _, _ = utilities.to_ycbcr_arrays(pil_img)
-            
-            if extract_method == "Standard Algorithm":
-                bits = watermarking.extract_watermark(y)
-                wm_rec = np.array(bits, dtype=np.uint8).reshape(parameters.WATERMARK_SIZE, parameters.WATERMARK_SIZE)
-                rec_big = Image.fromarray((wm_rec * 255).astype(np.uint8), mode="L").resize((256, 256), Image.NEAREST)
-                results.append((name, bits, pil_to_bytes(rec_big, "PNG"), None, None))
-                
-            elif extract_method == "Enhanced Algorithm (for rotation)":
-                bits = watermarking.extract_watermark_enhanced(y)
-                wm_rec = np.array(bits, dtype=np.uint8).reshape(parameters.WATERMARK_SIZE, parameters.WATERMARK_SIZE)
-                rec_big = Image.fromarray((wm_rec * 255).astype(np.uint8), mode="L").resize((256, 256), Image.NEAREST)
-                results.append((name, bits, pil_to_bytes(rec_big, "PNG"), None, None))
-                
-            else:  # Compare Both
-                bits_std = watermarking.extract_watermark(y)
-                bits_enh = watermarking.extract_watermark_enhanced(y)
-                
-                wm_rec_std = np.array(bits_std, dtype=np.uint8).reshape(parameters.WATERMARK_SIZE, parameters.WATERMARK_SIZE)
-                wm_rec_enh = np.array(bits_enh, dtype=np.uint8).reshape(parameters.WATERMARK_SIZE, parameters.WATERMARK_SIZE)
-                
-                rec_big_std = Image.fromarray((wm_rec_std * 255).astype(np.uint8), mode="L").resize((256, 256), Image.NEAREST)
-                rec_big_enh = Image.fromarray((wm_rec_enh * 255).astype(np.uint8), mode="L").resize((256, 256), Image.NEAREST)
-                
-                results.append((name, bits_std, pil_to_bytes(rec_big_std, "PNG"), bits_enh, pil_to_bytes(rec_big_enh, "PNG")))
+                if extract_method == "Standard Algorithm":
+                    bits = watermarking.extract_watermark(y)
+                    wm_rec = np.array(bits, dtype=np.uint8).reshape(parameters.WATERMARK_SIZE, parameters.WATERMARK_SIZE)
+                    rec_big = Image.fromarray((wm_rec * 255).astype(np.uint8), mode="L").resize((256, 256), Image.NEAREST)
+                    results.append((name, bits, pil_to_bytes(rec_big, "PNG"), None, None))
 
-        st.session_state.extract["results"] = results
+                elif extract_method == "Enhanced Algorithm (for rotation)":
+                    bits = watermarking.extract_watermark_enhanced(y)
+                    wm_rec = np.array(bits, dtype=np.uint8).reshape(parameters.WATERMARK_SIZE, parameters.WATERMARK_SIZE)
+                    rec_big = Image.fromarray((wm_rec * 255).astype(np.uint8), mode="L").resize((256, 256), Image.NEAREST)
+                    results.append((name, bits, pil_to_bytes(rec_big, "PNG"), None, None))
 
-        # Show per-file results + metrics if ref available
-        for idx, result in enumerate(results, start=1):
-            if extract_method == "Compare Both":
-                name, bits_std, preview_std_png, bits_enh, preview_enh_png = result
-                st.markdown(f"### Extracted #{idx}: `{name}`")
-                
-                # Show source image and both extracted watermarks
-                col1, col2, col3 = st.columns(3, gap="medium")
-                with col1:
-                    st.markdown("**Source image**")
-                    st.image(get_preview_image(bytes_to_pil(st.session_state.extract["atk_bytes"][idx-1])))
-                with col2:
-                    st.markdown("**Standard Algorithm**")
-                    st.image(Image.open(io.BytesIO(preview_std_png)), clamp=True)
-                with col3:
-                    st.markdown("**Enhanced Algorithm**")
-                    st.image(Image.open(io.BytesIO(preview_enh_png)), clamp=True)
-                
-                # Show metrics comparison if reference is available
-                ref_bits = st.session_state.extract["ref_bits"]
-                if ref_bits is not None:
-                    # Standard algorithm metrics
-                    ber_std, stats_std = utilities.bit_error_rate(ref_bits, bits_std, return_counts=True)
-                    ncc_std = utilities.normalized_cross_correlation(ref_bits, bits_std)
-                    
-                    # Enhanced algorithm metrics
-                    ber_enh, stats_enh = utilities.bit_error_rate(ref_bits, bits_enh, return_counts=True)
-                    ncc_enh = utilities.normalized_cross_correlation(ref_bits, bits_enh)
-                    
-                    # Display metrics side by side
-                    st.markdown("#### Metrics Comparison")
-                    col_std, col_enh = st.columns(2, gap="large")
-                    
-                    with col_std:
+                else:  # Compare Both
+                    bits_std = watermarking.extract_watermark(y)
+                    bits_enh = watermarking.extract_watermark_enhanced(y)
+
+                    wm_rec_std = np.array(bits_std, dtype=np.uint8).reshape(parameters.WATERMARK_SIZE, parameters.WATERMARK_SIZE)
+                    wm_rec_enh = np.array(bits_enh, dtype=np.uint8).reshape(parameters.WATERMARK_SIZE, parameters.WATERMARK_SIZE)
+
+                    rec_big_std = Image.fromarray((wm_rec_std * 255).astype(np.uint8), mode="L").resize((256, 256), Image.NEAREST)
+                    rec_big_enh = Image.fromarray((wm_rec_enh * 255).astype(np.uint8), mode="L").resize((256, 256), Image.NEAREST)
+
+                    results.append((name, bits_std, pil_to_bytes(rec_big_std, "PNG"), bits_enh, pil_to_bytes(rec_big_enh, "PNG")))
+
+            st.session_state.extract["results"] = results
+
+            # Show per-file results + metrics if ref available
+            for idx, result in enumerate(results, start=1):
+                if extract_method == "Compare Both":
+                    name, bits_std, preview_std_png, bits_enh, preview_enh_png = result
+                    st.markdown(f"### Extracted #{idx}: `{name}`")
+
+                    col1, col2, col3 = st.columns(3, gap="medium")
+                    with col1:
+                        st.markdown("**Source image**")
+                        st.image(get_preview_image(bytes_to_pil(st.session_state.extract["atk_bytes"][idx-1])))
+                    with col2:
                         st.markdown("**Standard Algorithm**")
-                        c1, c2 = st.columns(2)
-                        with c1: st.metric("BER", f"{ber_std:.4f}")
-                        with c2: st.metric("NCC", f"{ncc_std:.4f}")
-                        st.write(f"Accuracy: **{stats_std['accuracy']:.4f}**  |  Errors: **{stats_std['errors']}/{stats_std['total']}**")
-                    
-                    with col_enh:
+                        st.image(Image.open(io.BytesIO(preview_std_png)), clamp=True)
+                    with col3:
                         st.markdown("**Enhanced Algorithm**")
-                        c1, c2 = st.columns(2)
-                        with c1: st.metric("BER", f"{ber_enh:.4f}")
-                        with c2: st.metric("NCC", f"{ncc_enh:.4f}")
-                        st.write(f"Accuracy: **{stats_enh['accuracy']:.4f}**  |  Errors: **{stats_enh['errors']}/{stats_enh['total']}**")
-                    
-                    # Highlight better performing algorithm
-                    if stats_std['accuracy'] > stats_enh['accuracy']:
-                        st.success("Standard algorithm performed better for this image")
-                    elif stats_enh['accuracy'] > stats_std['accuracy']:
-                        st.success("Enhanced algorithm performed better for this image")
-                    else:
-                        st.info("Both algorithms performed equally")
-                        
-                else:
-                    st.info("Upload the reference watermark above to compute BER and NCC metrics.")
-                    
-            else:
-                # Single algorithm result
-                name, bits_out, preview_png = result[:3]
-                st.markdown(f"### Extracted #{idx}: `{name}`")
-                col1, col2 = st.columns(2, gap="large")
-                with col1:
-                    st.markdown("**Source image**")
-                    st.image(get_preview_image(bytes_to_pil(st.session_state.extract["atk_bytes"][idx-1])))
-                with col2:
-                    method_name = "Standard" if extract_method == "Standard Algorithm" else "Enhanced"
-                    st.markdown(f"**Recovered watermark ({method_name})**")
-                    st.image(Image.open(io.BytesIO(preview_png)), clamp=True)
+                        st.image(Image.open(io.BytesIO(preview_enh_png)), clamp=True)
 
-                ref_bits = st.session_state.extract["ref_bits"]
-                if ref_bits is not None:
-                    ber_val, stats = utilities.bit_error_rate(ref_bits, bits_out, return_counts=True)
-                    ncc_val = utilities.normalized_cross_correlation(ref_bits, bits_out)
-                    c1, c2 = st.columns(2)
-                    with c1: st.metric("BER", f"{ber_val:.4f}")
-                    with c2: st.metric("NCC", f"{ncc_val:.4f}")
-                    st.write(f"Accuracy: **{stats['accuracy']:.4f}**  |  Errors: **{stats['errors']}/{stats['total']}**")
+                    ref_bits = st.session_state.extract["ref_bits"]
+                    if ref_bits is not None:
+                        ber_std, stats_std = utilities.bit_error_rate(ref_bits, bits_std, return_counts=True)
+                        ncc_std = utilities.normalized_cross_correlation(ref_bits, bits_std)
+
+                        ber_enh, stats_enh = utilities.bit_error_rate(ref_bits, bits_enh, return_counts=True)
+                        ncc_enh = utilities.normalized_cross_correlation(ref_bits, bits_enh)
+
+                        st.markdown("#### Metrics Comparison")
+                        col_std, col_enh = st.columns(2, gap="large")
+                        with col_std:
+                            st.markdown("**Standard Algorithm**")
+                            c1, c2 = st.columns(2)
+                            with c1: st.metric("BER", f"{ber_std:.4f}")
+                            with c2: st.metric("NCC", f"{ncc_std:.4f}")
+                            st.write(f"Accuracy: **{stats_std['accuracy']:.4f}**  |  Errors: **{stats_std['errors']}/{stats_std['total']}**")
+                        with col_enh:
+                            st.markdown("**Enhanced Algorithm**")
+                            c1, c2 = st.columns(2)
+                            with c1: st.metric("BER", f"{ber_enh:.4f}")
+                            with c2: st.metric("NCC", f"{ncc_enh:.4f}")
+                            st.write(f"Accuracy: **{stats_enh['accuracy']:.4f}**  |  Errors: **{stats_enh['errors']}/{stats_enh['total']}**")
+
+                        if stats_std['accuracy'] > stats_enh['accuracy']:
+                            st.success("Standard algorithm performed better for this image")
+                        elif stats_enh['accuracy'] > stats_std['accuracy']:
+                            st.success("Enhanced algorithm performed better for this image")
+                        else:
+                            st.info("Both algorithms performed equally")
+                    else:
+                        st.info("Upload the reference watermark above to compute BER and NCC metrics.")
+
                 else:
-                    st.info("Upload the reference watermark above to compute BER and NCC metrics.")
-            
-            st.markdown("---")
+                    name, bits_out, preview_png = result[:3]
+                    st.markdown(f"### Extracted #{idx}: `{name}`")
+                    col1, col2 = st.columns(2, gap="large")
+                    with col1:
+                        st.markdown("**Source image**")
+                        st.image(get_preview_image(bytes_to_pil(st.session_state.extract["atk_bytes"][idx-1])))
+                    with col2:
+                        method_name = "Standard" if extract_method == "Standard Algorithm" else "Enhanced"
+                        st.markdown(f"**Recovered watermark ({method_name})**")
+                        st.image(Image.open(io.BytesIO(preview_png)), clamp=True)
+
+                    ref_bits = st.session_state.extract["ref_bits"]
+                    if ref_bits is not None:
+                        ber_val, stats = utilities.bit_error_rate(ref_bits, bits_out, return_counts=True)
+                        ncc_val = utilities.normalized_cross_correlation(ref_bits, bits_out)
+                        c1, c2 = st.columns(2)
+                        with c1: st.metric("BER", f"{ber_val:.4f}")
+                        with c2: st.metric("NCC", f"{ncc_val:.4f}")
+                        st.write(f"Accuracy: **{stats['accuracy']:.4f}**  |  Errors: **{stats['errors']}/{stats['total']}**")
+                    else:
+                        st.info("Upload the reference watermark above to compute BER and NCC metrics.")
+
+                st.markdown("---")
+
 
 # ----------------------------
 # TAB 3: ATTACK
