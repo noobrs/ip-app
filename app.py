@@ -51,7 +51,7 @@ if "ref_wm_bits" not in st.session_state:
 # TAB 1: EMBED
 # ==========================================================
 with tabs[0]:
-    st.header("Embed")
+    st.header("Embed Watermark")
 
     # Session flags
     if "embed_done" not in st.session_state:
@@ -140,7 +140,7 @@ with tabs[0]:
         bits_for_preview = st.session_state["last_wm_bits"]
 
     if bits_for_preview is not None:
-        st.markdown("**Watermark preview (32×32, binary)**")
+        st.markdown("**Watermark preview**")
         canvas_size = 256  # match your canvas for a clear, pixelated upscale
         wm_bin_preview = np.array(bits_for_preview, dtype=np.uint8).reshape((parameters.WATERMARK_SIZE, parameters.WATERMARK_SIZE))
         big = Image.fromarray((wm_bin_preview * 255).astype(np.uint8), mode="L").resize(
@@ -152,13 +152,13 @@ with tabs[0]:
         if wm_source == "Draw image":
             bin_img_exact = Image.fromarray((wm_bin_preview * 255).astype(np.uint8), mode="L")
             buf = BytesIO()
-            bin_img_exact.save(buf, format="PNG")
+            bin_img_exact.save(buf, format="JPEG")
             buf.seek(0)
             st.download_button(
-                "⬇️ Download watermark (32×32 PNG)",
+                "Download watermark",
                 data=buf,
-                file_name="watermark_32x32.png",
-                mime="image/png",
+                file_name="watermark.jpg",
+                mime="image/jpeg",
                 use_container_width=False,
             )
     else:
@@ -170,7 +170,7 @@ with tabs[0]:
     place_embed_button_here = True  # set True for both modes so it's always below preview
 
     if place_embed_button_here:
-        if st.button("Embed Watermark"):
+        if st.button("Embed"):
             if wm_bits is None or len(host_pils) == 0:
                 st.warning("Please provide a watermark or at least one host image.")
                 st.stop()
@@ -216,7 +216,7 @@ with tabs[0]:
                 st.metric("PSNR (Original vs Watermarked)", f"{psnr_val:.2f} dB")
                 np_image_download_button(
                     wm_rgb_pil,
-                    f"⬇️ Download `{name}` (watermarked)",
+                    f"Download `{name}` (watermarked)",
                     out_name,
                     unique_key=unique_key  # Provide the unique key here
                 )
@@ -234,7 +234,7 @@ with tabs[0]:
                         zf.writestr(fname, img_bytes.read())
                 zip_buffer.seek(0)
                 st.download_button(
-                    "⬇️ Download ALL watermarked images (ZIP)",
+                    "Download ALL watermarked images (ZIP)",
                     data=zip_buffer,
                     file_name="watermarked_batch.zip",
                     mime="application/zip",
@@ -246,12 +246,12 @@ with tabs[0]:
 # TAB 2: EXTRACT
 # ==========================================================
 with tabs[1]:
-    st.header("Extract")
+    st.header("Extract Watermark")
 
     # ==== Watermarked Image upload ====
     st.markdown("### Watermarked Image")
     attacked_files = st.file_uploader(
-        "Upload one or more watermarked images.",
+        "Upload one or more watermarked images to extract watermark.",
         type=["png","jpg","jpeg","webp"],
         key="attacked_upl",
         accept_multiple_files=True
@@ -302,7 +302,7 @@ with tabs[1]:
     ref_bits = None
     if ori_wm_file:
         try:
-            st.markdown("**Original watermark (32×32 binarized preview)**")
+            st.markdown("**Original watermark preview**")
             ori_pil = Image.open(ori_wm_file).convert("RGBA")
             # composite on white to handle transparency
             bg = Image.new("RGBA", ori_pil.size, (255, 255, 255, 255))
@@ -323,7 +323,7 @@ with tabs[1]:
             ref_bits = None
 
     # ---------- EXTRACT ACTION ----------
-    if st.button("Extract Watermark(s)"):
+    if st.button("Extract"):
         if not attacked_files:
             st.warning("Please upload at least one watermarked image.")
             st.stop()
