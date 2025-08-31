@@ -590,8 +590,8 @@ def tab_attack():
         if not cropping_files:
             st.info("Upload images to see cropping attack preview.")
         else:
-            area_ratio = st.slider("Area Ratio", 0.0001, 0.01, 0.001, step=0.0001, format="%.4f", key="crop_area_ratio")
-            num_patches = st.slider("Number of Patches", 1, 10, 2, key="crop_num_patches")
+            area_ratio = st.slider("Area Ratio", 0.01, 0.1, 0.05, step=0.01, format="%.2f", key="crop_area_ratio")
+            num_patches = st.slider("Number of Patches", 1, 10, 1, key="crop_num_patches")
             seed = st.slider("Seed", 0, 100, 42, key="crop_seed")
 
             out_list = []
