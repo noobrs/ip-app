@@ -37,3 +37,24 @@ def rotation_attack(pil_img, angle=5.0, fill_color=(255, 255, 255)):
     Fill color is used for areas outside the original image boundaries.
     """
     return pil_img.rotate(angle, resample=Image.BICUBIC, expand=False, fillcolor=fill_color)
+
+# =========================
+# Additive Noise Attack
+# =========================
+def gaussian_noise_attack(in_arr, std=10, seed=None):
+    """Add Gaussian noise to the image array."""
+    if seed is not None:
+        np.random.seed(seed)
+    
+    noise = np.random.normal(0, std, in_arr.shape)
+    noisy = np.clip(in_arr.astype(np.float32) + noise, 0, 255)
+    return noisy.astype(np.uint8)
+
+def uniform_noise_attack(in_arr, intensity=20, seed=None):
+    """Add uniform noise to the image array."""
+    if seed is not None:
+        np.random.seed(seed)
+    
+    noise = np.random.uniform(-intensity, intensity, in_arr.shape)
+    noisy = np.clip(in_arr.astype(np.float32) + noise, 0, 255)
+    return noisy.astype(np.uint8)

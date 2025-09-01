@@ -701,6 +701,92 @@ def tab_attack():
                     use_container_width=True,
                     key="dl_zip_rot"
                 )
+    
+    # -- Additive Noise -- 
+    with attack_tabs[3]:
+        st.markdown("### Additive Noise Attack")
+        noise_files = st.file_uploader(
+            "Upload one or more original watermarked images",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="noise_attack_files",
+            accept_multiple_files=True,
+        )
+
+        if not noise_files:
+            st.info("Upload images to see noise attack preview.")
+        else:
+            # Noise type selection - REMOVED Salt & Pepper
+            noise_type = st.radio(
+                "Select noise type:",
+                ["Gaussian Noise", "Uniform Noise"],
+                horizontal=True,
+                key="noise_type_selection"
+            )
+            
+            # Parameters based on noise type
+            if noise_type == "Gaussian Noise":
+                std = st.slider("Standard Deviation", 1, 15, 10, key="gaussian_std")
+                param_text = f"σ={std}"
+                param_short = f"std{std}"
+            else:  # Uniform Noise
+                intensity = st.slider("Noise Intensity", 1, 25, 20, key="uniform_intensity")
+                param_text = f"intensity={intensity}"
+                param_short = f"uni{intensity}"
+            
+            seed = st.slider("Seed", 0, 100, 42, key="noise_seed")
+
+            out_list = []
+            for f in noise_files:
+                try:
+                    p = Image.open(f).convert("RGB")
+                    if not aspect_ok(p):
+                        st.error(f"Rejected {getattr(f,'name','file')}: aspect ratio too extreme.")
+                        continue
+                    p, _ = resize_into_range(p, 512, 1080)
+                    
+                    # Apply noise attack based on selection - REMOVED Salt & Pepper
+                    arr = np.array(p)
+                    if noise_type == "Gaussian Noise":
+                        attacked_arr = attacks.gaussian_noise_attack(arr, std=std, seed=seed)
+                    else:  # Uniform Noise
+                        attacked_arr = attacks.uniform_noise_attack(arr, intensity=intensity, seed=seed)
+                    
+                    attacked_pil = Image.fromarray(attacked_arr.astype(np.uint8))
+                    name = getattr(f, "name", "original.png")
+
+                    col1, col2 = st.columns(2, gap="large")
+                    with col1:
+                        st.markdown("*Original*")
+                        st.image(get_preview_image(p), caption=f"{p.width}×{p.height}px")
+                    with col2:
+                        st.markdown(f"{noise_type} ({param_text})")
+                        st.image(get_preview_image(attacked_pil), caption=f"{attacked_pil.width}×{attacked_pil.height}px")
+
+                    out_name = f"{name.rsplit('.',1)[0]}_{param_short}_s{seed}.png"
+                    np_image_download_button(
+                        attacked_pil,
+                        f"Download {noise_type}",
+                        out_name,
+                        unique_key=f"noise_download_{name}{param_short}{seed}"
+                    )
+                    out_list.append((out_name, pil_to_bytes(attacked_pil, "PNG")))
+                    st.markdown("---")
+                except Exception as e:
+                    st.warning(f"Failed: {e}")
+
+            if len(out_list) > 1:
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    for fname, b in out_list: zf.writestr(fname, b)
+                zip_buffer.seek(0)
+                st.download_button(
+                    f"Download ALL {noise_type} images (ZIP)",
+                    data=zip_buffer,
+                    file_name=f"{noise_type.lower().replace(' ', '')}_attacked_batch{param_short}_s{seed}.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    key="dl_zip_noise"
+                )
 
 # ----------------------------
 # Main tabs
