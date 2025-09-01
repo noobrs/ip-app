@@ -35,25 +35,20 @@ def bit_error_rate(true_bits_u8, pred_bits_u8, return_counts=False):
 # =========================
 # NCC
 # =========================
-def normalized_cross_correlation(true_bits_u8, pred_bits_u8):
-    """Compute Normalized Cross-Correlation between two binary watermarks."""
-    true_bits_u8 = np.asarray(true_bits_u8).astype(np.float64).ravel()
-    pred_bits_u8 = np.asarray(pred_bits_u8).astype(np.float64).ravel()
-    assert true_bits_u8.size == pred_bits_u8.size, "Mismatch in bit lengths."
+def normalized_cross_correlation(true_bits, extracted_bits):
+    """Calculate Normalized Cross Correlation (NCC)"""
+    true_flat = true_bits.astype(np.float64).flatten()
+    extracted_flat = extracted_bits.astype(np.float64).flatten()
     
-    # Center the data (subtract mean)
-    true_centered = true_bits_u8 - np.mean(true_bits_u8)
-    pred_centered = pred_bits_u8 - np.mean(pred_bits_u8)
+    # Normalize to zero mean
+    true_norm = true_flat - np.mean(true_flat)
+    extracted_norm = extracted_flat - np.mean(extracted_flat)
     
-    # Compute NCC
-    numerator = np.sum(true_centered * pred_centered)
-    denominator = np.sqrt(np.sum(true_centered**2) * np.sum(pred_centered**2))
+    # Calculate NCC
+    numerator = np.sum(true_norm * extracted_norm)
+    denominator = np.sqrt(np.sum(true_norm**2) * np.sum(extracted_norm**2))
     
-    # Avoid division by zero
-    if denominator == 0:
-        return 0.0
-    
-    return numerator / denominator
+    return numerator / denominator if denominator != 0 else 0
 
 # =========================
 # Image Conversion
