@@ -498,7 +498,7 @@ def tab_attack():
     st.header("Attack Simulation")
     st.info("Upload watermarked images to simulate attacks and download the attacked versions.")
 
-    attack_tabs = st.tabs(["JPEG Compression", "Cropping", "Small Rotation"])
+    attack_tabs = st.tabs(["JPEG Compression", "Cropping", "Small Rotation", "Additive Noise"])
 
     # --- JPEG ---
     with attack_tabs[0]:
