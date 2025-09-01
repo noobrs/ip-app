@@ -343,7 +343,14 @@ with tabs[0]:
 
                 psnr_val = utilities.psnr(utilities.pil_to_np_rgb(hp), utilities.pil_to_np_rgb(wm_rgb_pil))
                 st.metric("PSNR (Original vs Watermarked)", f"{psnr_val:.2f} dB")
-                np_image_download_button(wm_rgb_pil, f"⬇️ Download `{name}` (watermarked)", f"{name.rsplit('.',1)[0]}_watermarked.png")
+                st.download_button(
+                    f"Download `{name}` (watermarked)",
+                    data=out_pairs[-1][1],
+                    file_name=out_name,
+                    mime="image/png",
+                    use_container_width=False,
+                    key=f"dl_wm_{name}"
+                )
                 st.markdown("---")
 
 # ==========================================================
@@ -425,65 +432,63 @@ with tabs[1]:
 
 # ----------------------------
 # TAB 3: ATTACK
-# ==========================================================
-with tabs[2]:
-    st.header("Attack")
-    if st.session_state["watermarked_rgb"] is None:
-        st.info("Please embed first in the **Embed** tab to run built-in attacks here.")
-    else:
-        wm_rgb = st.session_state["watermarked_rgb"]
-        sub = st.tabs(["JPEG Compression", "JPEG 2000", "Small Cutouts"])
+# ----------------------------
+def tab_attack():
+    st.header("Attack Simulation")
+    st.info("Upload watermarked images to simulate attacks and download the attacked versions.")
 
-        # JPEG Attack
-        with sub[0]:
-            q = st.slider("JPEG quality", 10, 95, 75, step=1, key="jpegq")
-            if st.button("Run JPEG Attack"):
-                buf = io.BytesIO()
-                np_rgb_to_pil(wm_rgb).save(buf, format="JPEG", quality=q, subsampling=0, optimize=False)
-                buf.seek(0)
-                atk_pil = Image.open(buf).convert("RGB")
-                st.image(atk_pil, caption=f"JPEG q={q}", use_column_width=True)
+    attack_tabs = st.tabs(["JPEG Compression", "Cropping", "Small Rotation"])
 
-                # Extract after attack
-                y_atk, _, _ = rgb_to_ycbcr_arrays(atk_pil)
-                bits_atk = extract_bits_y_multilevel_svd_qim(
-                    y_luma=y_atk,
-                    n_bits=WATERMARK_N * WATERMARK_N,
-                    secret_key=int(secret_key),
-                    quant_step=float(quant_step),
-                    svd_index=int(svd_index),
-                    svd_patch=((r0, r1), (c0, c1)),
-                    wavelet=wavelet,
-                    dwt_levels=int(dwt_levels),
-                    tiles=(int(tiles_r), int(tiles_c)),
-                    include_LL=bool(include_LL),
-                    include_D=bool(include_D),
-                )
-                wm_atk = np.array(bits_atk, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
+    # --- JPEG ---
+    with attack_tabs[0]:
+        st.markdown("### JPEG Attack")
+        jpeg_files = st.file_uploader(
+            "Upload one or more original watermarked images",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="jpeg_attack_files",
+            accept_multiple_files=True,
+        )
 
-                col5, col6 = st.columns(2)
-                with col5:
-                    st.markdown("**Extracted (JPEG)**")
-                    st.image((wm_atk * 255).astype(np.uint8), clamp=True, width=256)
-                with col6:
-                    # BER if a reference was provided earlier in Extract tab
-                    if st.session_state["ref_wm_bits"] is not None:
-                        ber_val, stats = bit_error_rate(st.session_state["ref_wm_bits"], bits_atk, return_counts=True)
-                        st.metric("BER (JPEG)", f"{ber_val:.4f}")
-                        st.write(f"Accuracy: **{stats['accuracy']:.4f}**  |  Errors: **{stats['errors']}/{stats['total']}**")
-                    elif st.session_state["last_wm_bits"] is not None:
-                        # fallback to BER vs last embedded bits (if same watermark)
-                        ber_val, stats = bit_error_rate(st.session_state["last_wm_bits"], bits_atk, return_counts=True)
-                        st.metric("BER (JPEG vs last embedded)", f"{ber_val:.4f}")
-                    else:
-                        st.info("To show BER here, run Extract with an original watermark first.")
-                        
-        # JPEG 2000 Attack
-        with sub[1]:
-            comp = st.slider("JPEG 2000 compression ×1000", 500, 8000, 2000, step=100, help="Higher = stronger compression")
-            if st.button("Run JPEG 2000 Attack"):
+        if not jpeg_files:
+            st.info("Upload images to see JPEG attack preview.")
+        else:
+            quality = st.slider("JPEG Quality", 10, 95, 75, step=1, key="jpeg_quality_slider")
+            out_list = []
+            for f in jpeg_files:
                 try:
-                    atk_rgb, jp2_bytes = jpeg2000_attack_mem(st.session_state["watermarked_rgb"], compression_x1000=int(comp))
+                    p = Image.open(f).convert("RGB")
+                    if not aspect_ok(p):
+                        st.error(f"Rejected `{getattr(f,'name','file')}`: aspect ratio too extreme.")
+                        continue
+                    p, _ = resize_into_range(p, 512, 1080)
+
+                    # compress → bytes
+                    buf = io.BytesIO()
+                    p.save(buf, format="JPEG", quality=quality, subsampling=0, optimize=False)
+                    jpeg_bytes = buf.getvalue()
+
+                    # preview (exact file to be downloaded)
+                    prev = Image.open(io.BytesIO(jpeg_bytes)).convert("RGB")
+                    name = getattr(f, "name", "original.png")
+                    col1, col2 = st.columns(2, gap="large")
+                    with col1:
+                        st.markdown("**Original**")
+                        st.image(get_preview_image(p), caption=f"{p.width}×{p.height}px")
+                    with col2:
+                        st.markdown(f"**JPEG Q{quality}**")
+                        st.image(get_preview_image(prev), caption=f"{prev.width}×{prev.height}px")
+
+                    out_name = f"{name.rsplit('.',1)[0]}_jpeg_q{quality}.jpg"
+                    st.download_button(
+                        f"Download JPEG Q{quality}",
+                        data=jpeg_bytes,
+                        file_name=out_name,
+                        mime="image/jpeg",
+                        use_container_width=False,
+                        key=f"jpeg_download_{name}_{quality}"
+                    )
+                    out_list.append((out_name, jpeg_bytes))
+                    st.markdown("---")
                 except Exception as e:
                     st.error(f"JPEG 2000 not available in this environment: {e}")
                     st.stop()
@@ -493,195 +498,151 @@ with tabs[2]:
 
                 # Optional: download the attacked JP2 file
                 st.download_button(
-                    "⬇️ Download attacked JP2",
-                    data=jp2_bytes,
-                    file_name=f"attack_jpeg2000_x{comp}.jp2",
-                    mime="image/jp2"
+                    f"Download ALL JPEG Q{quality} (ZIP)",
+                    data=zip_buffer,
+                    file_name=f"jpeg_attacked_batch_q{quality}.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    key="dl_zip_jpeg"
                 )
 
-                # Extract after JP2 attack
-                y_atk, _, _ = rgb_to_ycbcr_arrays(atk_pil)
-                bits_atk = extract_bits_y_multilevel_svd_qim(
-                    y_luma=y_atk,
-                    n_bits=WATERMARK_N * WATERMARK_N,
-                    secret_key=int(secret_key),
-                    quant_step=float(quant_step),
-                    svd_index=int(svd_index),
-                    svd_patch=((r0, r1), (c0, c1)),
-                    wavelet=wavelet,
-                    dwt_levels=int(dwt_levels),
-                    tiles=(int(tiles_r), int(tiles_c)),
-                    include_LL=bool(include_LL),
-                    include_D=bool(include_D),
-                )
-                wm_atk = np.array(bits_atk, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
-
-                colJ2k1, colJ2k2 = st.columns(2)
-                with colJ2k1:
-                    st.markdown("**Extracted (JPEG 2000)**")
-                    st.image((wm_atk * 255).astype(np.uint8), clamp=True, width=256)
-                with colJ2k2:
-                    if st.session_state.get("ref_wm_bits") is not None:
-                        ber_val, stats = bit_error_rate(st.session_state["ref_wm_bits"], bits_atk, return_counts=True)
-                        st.metric("BER (JPEG 2000)", f"{ber_val:.4f}")
-                        st.write(f"Accuracy: **{stats['accuracy']:.4f}**  |  Errors: **{stats['errors']}/{stats['total']}**")
-                    elif st.session_state.get("last_wm_bits") is not None:
-                        ber_val, stats = bit_error_rate(st.session_state["last_wm_bits"], bits_atk, return_counts=True)
-                        st.metric("BER (JPEG 2000 vs last embedded)", f"{ber_val:.4f}")
-                    else:
-                        st.info("To show BER here, run Extract with an original watermark first.")
-
-        # Small Cutout Attack
-        with sub[2]:
-            area = st.slider("Patch area ratio", 0.0001, 0.01, 0.001, step=0.0001, format="%.4f", key="arear")
-            nump = st.slider("Number of patches", 1, 150, 50, key="nump")
-            shape = st.selectbox("Shape", ["rect", "circle"], index=0, key="shape")
-            fill = st.selectbox("Fill", ["noise", "black", "avg", "blur"], index=0, key="fill")
-            blur_k = st.slider("Blur kernel (odd)", 3, 31, 11, step=2, key="blurk")
-
-            if st.button("Run Small Cutout Attack"):
-                atk_rgb = small_random_cutout_mem(
-                    in_rgb=wm_rgb, area_ratio=float(area), num_patches=int(nump),
-                    shape=shape, fill=fill, blur_kernel=int(blur_k), seed=int(secret_key)
-                )
-                atk_pil = np_rgb_to_pil(atk_rgb)
-                st.image(atk_pil, caption=f"Small cutouts ({nump} patches, {area:.4f} area each)", use_column_width=True)
-
-                # Extract after attack
-                y_atk, _, _ = rgb_to_ycbcr_arrays(atk_pil)
-                bits_atk = extract_bits_y_multilevel_svd_qim(
-                    y_luma=y_atk,
-                    n_bits=WATERMARK_N * WATERMARK_N,
-                    secret_key=int(secret_key),
-                    quant_step=float(quant_step),
-                    svd_index=int(svd_index),
-                    svd_patch=((r0, r1), (c0, c1)),
-                    wavelet=wavelet,
-                    dwt_levels=int(dwt_levels),
-                    tiles=(int(tiles_r), int(tiles_c)),
-                    include_LL=bool(include_LL),
-                    include_D=bool(include_D),
-                )
-                wm_atk = np.array(bits_atk, dtype=np.uint8).reshape(WATERMARK_N, WATERMARK_N)
-
-                col7, col8 = st.columns(2)
-                with col7:
-                    st.markdown("**Extracted (Small Cutouts)**")
-                    st.image((wm_atk * 255).astype(np.uint8), clamp=True, width=256)
-                with col8:
-                    if st.session_state["ref_wm_bits"] is not None:
-                        ber_val, stats = bit_error_rate(st.session_state["ref_wm_bits"], bits_atk, return_counts=True)
-                        st.metric("BER (Cutouts)", f"{ber_val:.4f}")
-                        st.write(f"Accuracy: **{stats['accuracy']:.4f}**  |  Errors: **{stats['errors']}/{stats['total']}**")
-                    elif st.session_state["last_wm_bits"] is not None:
-                        ber_val, stats = bit_error_rate(st.session_state["last_wm_bits"], bits_atk, return_counts=True)
-                        st.metric("BER (Cutouts vs last embedded)", f"{ber_val:.4f}")
-                    else:
-                        st.info("To show BER here, run Extract with an original watermark first.")
-
-# ==========================================================
-# TAB 4: FLOW (visual explanation)
-# ==========================================================
-with tabs[3]:
-    st.header("How it Works: Embed & Extract")
-
-    colL, colR = st.columns(2)
-
-    # -------- Embed pipeline diagram --------
-    with colL:
-        st.subheader("Embed pipeline")
-        dot_embed = graphviz.Digraph("embed", format="svg")
-        dot_embed.attr(rankdir="LR", fontsize="10", labelloc="t")
-
-        dot_embed.node("rgb_in", "Host RGB")
-        dot_embed.node("ycbcr", "Convert to YCbCr\n(embed in Y only)")
-        dot_embed.node("dwt", "Multi-level DWT\n(H,V,(D) bands)")
-        dot_embed.node("tiling", "Tile each band\n(e.g., 2×2)")
-        dot_embed.node("dct", "8×8 block DCT\n(JPEG-like)")
-        dot_embed.node("patch", "Mid-band patch\n(rows r0:r1, cols c0:c1)")
-        dot_embed.node("svd", "SVD: U·diag(σ)·Vᵀ")
-        dot_embed.node("qim", "QIM on σₖ\n(step=Δ, bit∈{0,1})")
-        dot_embed.node("idct", "IDCT per 8×8")
-        dot_embed.node("idwt", "Inverse DWT")
-        dot_embed.node("merge", "Merge Y with Cb/Cr")
-        dot_embed.node("rgb_out", "Watermarked RGB")
-
-        # Secret key branch
-        dot_embed.node("key", "Secret key", shape="note")
-        dot_embed.node("rand", "Randomized block assignment\n(seed = key ⊕ tile ⊕ band ⊕ level)")
-        dot_embed.edge("key", "rand", style="dashed")
-        dot_embed.edge("rand", "dct", style="dashed", label="select block order")
-
-        # Main flow
-        dot_embed.edge("rgb_in", "ycbcr")
-        dot_embed.edge("ycbcr", "dwt")
-        dot_embed.edge("dwt", "tiling")
-        dot_embed.edge("tiling", "dct")
-        dot_embed.edge("dct", "patch")
-        dot_embed.edge("patch", "svd")
-        dot_embed.edge("svd", "qim")
-        dot_embed.edge("qim", "idct")
-        dot_embed.edge("idct", "idwt")
-        dot_embed.edge("idwt", "merge")
-        dot_embed.edge("merge", "rgb_out")
-
-        st.graphviz_chart(dot_embed, use_container_width=True)
-
-        st.caption(
-            "We convert RGB→YCbCr and embed only in Y (luma) for perceptual robustness. "
-            "For each DWT band/tile, we DCT 8×8 blocks, take a **mid-band patch**, compute SVD, and quantize **one σₖ** via **QIM**. "
-            "A secret-key seeds randomized block assignment and repetition. Finally we IDCT, IDWT, and recombine Y with original Cb/Cr."
+    # --- Cropping ---
+    with attack_tabs[1]:
+        st.markdown("### Cropping Attack")
+        cropping_files = st.file_uploader(
+            "Upload one or more original watermarked images",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="cropping_attack_files",
+            accept_multiple_files=True,
         )
 
-    # -------- Extract pipeline diagram --------
-    with colR:
-        st.subheader("Extract pipeline")
-        dot_ext = graphviz.Digraph("extract", format="svg")
-        dot_ext.attr(rankdir="LR", fontsize="10", labelloc="t")
+        if not cropping_files:
+            st.info("Upload images to see cropping attack preview.")
+        else:
+            area_ratio = st.slider("Area Ratio", 0.01, 0.1, 0.05, step=0.01, format="%.2f", key="crop_area_ratio")
+            num_patches = st.slider("Number of Patches", 1, 10, 1, key="crop_num_patches")
+            seed = st.slider("Seed", 0, 100, 42, key="crop_seed")
 
-        dot_ext.node("rgb_in2", "Input RGB\n(watermarked/attacked)")
-        dot_ext.node("ycbcr2", "Convert to YCbCr\n(use Y)")
-        dot_ext.node("dwt2", "Multi-level DWT\n(same params)")
-        dot_ext.node("tiling2", "Same tiles")
-        dot_ext.node("dct2", "8×8 block DCT")
-        dot_ext.node("patch2", "Mid-band patch")
-        dot_ext.node("svd2", "SVD → σₖ")
-        dot_ext.node("llr", "QIM log-likelihood\nscore per block")
-        dot_ext.node("vote", "Soft voting across\nrepetitions/bands/tiles")
-        dot_ext.node("thresh", "Threshold ≥0 → bit=1\n<0 → bit=0")
-        dot_ext.node("reshape", "Reshape bits to 32×32\nwatermark")
+            out_list = []
+            for f in cropping_files:
+                try:
+                    p = Image.open(f).convert("RGB")
+                    if not aspect_ok(p):
+                        st.error(f"Rejected `{getattr(f,'name','file')}`: aspect ratio too extreme.")
+                        continue
+                    p, _ = resize_into_range(p, 512, 1080)
+                    attacked = attacks.crop_attack(
+                        in_arr=np.array(p),
+                        area_ratio=area_ratio,
+                        num_patches=num_patches,
+                        seed=seed
+                    )
+                    attacked_pil = attacked if isinstance(attacked, Image.Image) else Image.fromarray(attacked.astype(np.uint8))
+                    name = getattr(f, "name", "original.png")
 
-        # Secret key branch (same selection)
-        dot_ext.node("key2", "Secret key", shape="note")
-        dot_ext.node("rand2", "Reproduce block order")
-        dot_ext.edge("key2", "rand2", style="dashed")
-        dot_ext.edge("rand2", "dct2", style="dashed")
+                    col1, col2 = st.columns(2, gap="large")
+                    with col1:
+                        st.markdown("**Original**")
+                        st.image(get_preview_image(p), caption=f"{p.width}×{p.height}px")
+                    with col2:
+                        st.markdown(f"**Cropped (Area: {area_ratio:.4f}, Patches: {num_patches}, Seed: {seed})**")
+                        st.image(get_preview_image(attacked_pil), caption=f"{attacked_pil.width}×{attacked_pil.height}px")
 
-        # Main flow
-        dot_ext.edge("rgb_in2", "ycbcr2")
-        dot_ext.edge("ycbcr2", "dwt2")
-        dot_ext.edge("dwt2", "tiling2")
-        dot_ext.edge("tiling2", "dct2")
-        dot_ext.edge("dct2", "patch2")
-        dot_ext.edge("patch2", "svd2")
-        dot_ext.edge("svd2", "llr")
-        dot_ext.edge("llr", "vote")
-        dot_ext.edge("vote", "thresh")
-        dot_ext.edge("thresh", "reshape")
+                    out_name = f"{name.rsplit('.',1)[0]}_cropped_a{area_ratio}_p{num_patches}_s{seed}.png"
+                    np_image_download_button(
+                        attacked_pil,
+                        "Download Cropped",
+                        out_name,
+                        unique_key=f"cropping_download_{name}_{area_ratio}_{num_patches}_{seed}"
+                    )
+                    out_list.append((out_name, pil_to_bytes(attacked_pil, "PNG")))
+                    st.markdown("---")
+                except Exception as e:
+                    st.warning(f"Failed: {e}")
 
-        st.graphviz_chart(dot_ext, use_container_width=True)
+            st.session_state.attack["crop"] = out_list
 
-        st.caption(
-            "Extraction mirrors embedding: we recompute σₖ and convert to a **soft score** (LLR) per block, "
-            "then **sum** across repetitions/tiles/bands (soft voting). The sign of the total gives the bit, "
-            "and we reshape to 32×32. If you upload the original watermark, the app reports **BER**."
+            if len(out_list) > 1:
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    for fname, b in out_list: zf.writestr(fname, b)
+                zip_buffer.seek(0)
+                st.download_button(
+                    "Download ALL Cropped images (ZIP)",
+                    data=zip_buffer,
+                    file_name=f"cropped_attacked_batch_a{area_ratio}_p{num_patches}_s{seed}.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    key="dl_zip_crop"
+                )
+
+    # --- Small Rotation ---
+    with attack_tabs[2]:
+        st.markdown("### Small Rotation Attack")
+        rotation_files = st.file_uploader(
+            "Upload one or more original watermarked images",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="rotation_attack_files",
+            accept_multiple_files=True,
         )
 
-    st.markdown("---")
-    st.subheader("Why this design resists JPEG and small cutouts")
-    st.markdown(
-        "- **Mid-band DCT**: avoids DC/very-low frequencies (visible distortion) and very-high frequencies (aggressively quantized by JPEG).\n"
-        "- **Σ-only QIM**: singular values are stable summaries of patch energy → robust to mild filtering and quantization.\n"
-        "- **Tiling + randomized repetition**: spatial spread means small local erasures (stickers/dust) only remove a few votes.\n"
-        "- **Soft voting**: uses log-likelihood rather than hard 0/1, improving accuracy under moderate distortions."
-    )
+        if not rotation_files:
+            st.info("Upload images to see rotation attack preview.")
+        else:
+            angle = st.slider("Rotation Angle (degrees)", -5.0, 5.0, 1.0, step=0.5, key="rotation_angle")
+            fill = (0, 0, 0)  # fixed black fill
+
+            out_list = []
+            for f in rotation_files:
+                try:
+                    p = Image.open(f).convert("RGB")
+                    if not aspect_ok(p):
+                        st.error(f"Rejected `{getattr(f,'name','file')}`: aspect ratio too extreme.")
+                        continue
+                    p, _ = resize_into_range(p, 512, 1080)
+                    rotated = attacks.rotation_attack(p, angle=angle, fill_color=fill)
+                    name = getattr(f, "name", "original.png")
+
+                    col1, col2 = st.columns(2, gap="large")
+                    with col1:
+                        st.markdown("**Original**")
+                        st.image(get_preview_image(p), caption=f"{p.width}×{p.height}px")
+                    with col2:
+                        st.markdown(f"**Rotated ({angle}°)**")
+                        st.image(get_preview_image(rotated), caption=f"{rotated.width}×{rotated.height}px")
+
+                    out_name = f"{name.rsplit('.',1)[0]}_rotated_{angle}deg.png"
+                    np_image_download_button(
+                        rotated,
+                        "Download Rotated",
+                        out_name,
+                        unique_key=f"rotation_download_{name}_{angle}"
+                    )
+                    out_list.append((out_name, pil_to_bytes(rotated, "PNG")))
+                    st.markdown("---")
+                except Exception as e:
+                    st.warning(f"Failed: {e}")
+
+            st.session_state.attack["rotate"] = out_list
+
+            if len(out_list) > 1:
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    for fname, b in out_list: zf.writestr(fname, b)
+                zip_buffer.seek(0)
+                st.download_button(
+                    f"Download ALL Rotated images (ZIP)",
+                    data=zip_buffer,
+                    file_name=f"rotated_attacked_batch_{angle}deg_black.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    key="dl_zip_rot"
+                )
+
+# ----------------------------
+# Main tabs
+# ----------------------------
+tabs = st.tabs(["Embed", "Extract", "Attack"])
+with tabs[0]: tab_embed()
+with tabs[1]: tab_extract()
+with tabs[2]: tab_attack()
