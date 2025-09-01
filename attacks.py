@@ -30,7 +30,7 @@ def crop_attack(in_arr, area_ratio=0.01, num_patches=2, seed=42):
 # =========================
 # Rotation Attack
 # =========================
-def rotation_attack(pil_img, angle=5.0, fill_color=(255, 255, 255)):
+def rotation_attack(pil_img, angle=5.0, fill_color=(0, 0, 0)):
     """
     Rotate image by given angle in degrees.
     Positive angle = clockwise rotation.

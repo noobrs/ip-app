@@ -40,43 +40,54 @@ def normalized_cross_correlation(true_bits, extracted_bits):
     try:
         # Convert inputs to numpy arrays if they aren't already
         if not isinstance(true_bits, np.ndarray):
-            true_bits = np.array(true_bits)
-        if not isinstance(extracted_bits, np.ndarray):
-            extracted_bits = np.array(extracted_bits)
+            if hasattr(true_bits, '__iter__'):  # Check if iterable
+                true_bits = np.array(true_bits)
+            else:
+                raise ValueError(f"Invalid input type for true_bits: {type(true_bits)}")
         
-        # Ensure both arrays have the same shape
-        if true_bits.shape != extracted_bits.shape:
-            # Try to reshape if total elements are the same
+        if not isinstance(extracted_bits, np.ndarray):
+            if hasattr(extracted_bits, '__iter__'):  # Check if iterable
+                extracted_bits = np.array(extracted_bits)
+            else:
+                raise ValueError(f"Invalid input type for extracted_bits: {type(extracted_bits)}")
+        
+        # Handle edge cases
+        if true_bits.size == 0 or extracted_bits.size == 0:
+            return 0.0
+        
+        # Ensure both arrays have the same total number of elements
+        if true_bits.size != extracted_bits.size:
+            # Try to reshape if possible
             if true_bits.size == extracted_bits.size:
                 true_bits = true_bits.reshape(-1)
                 extracted_bits = extracted_bits.reshape(-1)
             else:
                 raise ValueError(f"Input arrays have different sizes: {true_bits.size} vs {extracted_bits.size}")
         
-        # Convert to float64 and flatten
-        true_flat = true_bits.astype(np.float64).flatten()
-        extracted_flat = extracted_bits.astype(np.float64).flatten()
+        # Convert to float64 and flatten (using notebook approach)
+        x = np.asarray(true_bits, dtype=np.float64).ravel()
+        y = np.asarray(extracted_bits, dtype=np.float64).ravel()
         
-        # Check for empty arrays
-        if true_flat.size == 0 or extracted_flat.size == 0:
+        # Verify same length after conversion
+        if len(x) != len(y):
+            raise ValueError(f"Array length mismatch after conversion: {len(x)} vs {len(y)}")
+        
+        # Calculate dot product and norms (notebook method)
+        num = np.dot(x, y)
+        norm_x = np.linalg.norm(x)
+        norm_y = np.linalg.norm(y)
+        den = norm_x * norm_y
+        
+        # Handle edge cases for denominator
+        if den == 0 or np.isnan(den) or np.isinf(den):
             return 0.0
-        
-        # Normalize to zero mean
-        true_norm = true_flat - np.mean(true_flat)
-        extracted_norm = extracted_flat - np.mean(extracted_flat)
         
         # Calculate NCC
-        numerator = np.sum(true_norm * extracted_norm)
-        denominator = np.sqrt(np.sum(true_norm**2) * np.sum(extracted_norm**2))
+        ncc_value = num / den
         
-        # Handle edge cases
-        if denominator == 0 or np.isnan(denominator) or np.isinf(denominator):
+        # Check for NaN or infinity in result
+        if np.isnan(ncc_value) or np.isinf(ncc_value):
             return 0.0
-        
-        ncc_value = numerator / denominator
-        
-        # Ensure result is within valid range [-1, 1]
-        ncc_value = np.clip(ncc_value, -1.0, 1.0)
         
         return float(ncc_value)
         
