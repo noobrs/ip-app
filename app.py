@@ -268,7 +268,7 @@ def tab_embed():
                     st.image(get_preview_image(wm_rgb_pil))
 
                 psnr_val = utilities.psnr(utilities.pil_to_np_rgb(hp), utilities.pil_to_np_rgb(wm_rgb_pil))
-                st.metric("PSNR (Original vs Watermarked)", f"{psnr_val:.2f} dB")
+                st.metric("PSNR (Original vs Watermarked)", f"{psnr_val:.4f} dB")
                 st.download_button(
                     f"Download watermarked image",
                     data=out_pairs[-1][1],
