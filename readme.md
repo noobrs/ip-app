@@ -1,6 +1,6 @@
-# Image Watermarking System
+# Tag It Smart: Image Watermarking System
 
-A robust digital image watermarking system that embeds and extracts binary watermarks using DWT-DCT-SVD transform domain techniques with Quantization Index Modulation (QIM).
+Tag It Smart is a robust digital image watermarking system that embeds and extracts binary watermarks using DWT-DCT-SVD transform domain techniques with Quantization Index Modulation (QIM) to withstand compression and cropping from WhatsApp.
 
 ## 🎯 Project Overview
 
